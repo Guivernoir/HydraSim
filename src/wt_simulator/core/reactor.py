@@ -29,7 +29,7 @@ References:
 - Stumm & Morgan "Aquatic Chemistry" (3rd ed.)
 
 Author: Guilherme F. G. Santos
-Date: January 2026
+Date: February 2026
 License: MIT
 """
 
@@ -78,6 +78,9 @@ class ReactorConfiguration:
 
     # Chlorination
     initial_chlorine: float = 2.0  # [mg/L]
+    initial_chloramine: float = 0.0  # [mg/L as Cl2]
+    initial_ammonia: float = 0.15  # [mg/L as N]
+    initial_chlorine_demand: float = 0.4  # [mg/L as Cl2 equivalent]
 
     # Temperature
     temperature: float = 20.0  # [°C]
@@ -86,6 +89,9 @@ class ReactorConfiguration:
     # Inlet conditions
     inlet_pH: float = 7.5
     inlet_chlorine: float = 0.0  # [mg/L]
+    inlet_chloramine: float = 0.0  # [mg/L as Cl2]
+    inlet_ammonia: float = 0.2  # [mg/L as N]
+    inlet_chlorine_demand: float = 0.6  # [mg/L as Cl2 equivalent]
     inlet_temperature: float = 20.0  # [°C]
 
     def validate(self) -> None:
@@ -107,6 +113,9 @@ class ReactorConfiguration:
         ), "Flow rate out of range (use 0 for batch mode)"
         assert 0 <= self.initial_pH <= 14, "pH out of range"
         assert 0 <= self.initial_chlorine <= 10, "Chlorine out of range"
+        assert 0 <= self.initial_chloramine <= 20, "Chloramine out of range"
+        assert 0 <= self.initial_ammonia <= 20, "Ammonia out of range"
+        assert 0 <= self.initial_chlorine_demand <= 20, "Chlorine demand out of range"
         assert 0 <= self.temperature <= 40, "Temperature out of typical range"
 
 
@@ -122,7 +131,12 @@ class ReactorState:
 
     # Primary state variables (per zone)
     pH: np.ndarray = field(default_factory=lambda: np.full(5, 7.0))
-    chlorine: np.ndarray = field(default_factory=lambda: np.full(5, 2.0))  # [mg/L]
+    chlorine: np.ndarray = field(default_factory=lambda: np.full(5, 2.0))  # [mg/L as Cl2]
+    chloramine: np.ndarray = field(default_factory=lambda: np.full(5, 0.0))  # [mg/L as Cl2]
+    ammonia: np.ndarray = field(default_factory=lambda: np.full(5, 0.15))  # [mg/L as N]
+    chlorine_demand: np.ndarray = field(
+        default_factory=lambda: np.full(5, 0.4)
+    )  # [mg/L as Cl2 equivalent]
     temperature: np.ndarray = field(default_factory=lambda: np.full(5, 20.0))  # [°C]
     flow_rate: float = 5.0  # [L/min] Current total flow through reactor
 
@@ -152,9 +166,8 @@ class BoundaryConditions:
     """
     Physical boundary conditions and forcing functions for the reactor.
 
-    CRITICAL: This represents PHYSICAL INPUTS to the system, NOT control commands.
-    These are the actual flows entering the reactor, which may be determined by
-    a separate control system but represent physical reality once set.
+    These fields represent physical inlet streams, not controller intent.
+    They are the flows and concentrations applied to the reactor model.
 
     Think of this as: "What physical streams are actually flowing into the tank?"
     NOT: "What should the controller do?"
@@ -169,6 +182,9 @@ class BoundaryConditions:
     inlet_flow_rate: float = 5.0  # [L/min] Main feed stream
     inlet_pH: float = 7.5
     inlet_chlorine: float = 0.0  # [mg/L]
+    inlet_chloramine: float = 0.0  # [mg/L as Cl2]
+    inlet_ammonia: float = 0.2  # [mg/L as N]
+    inlet_chlorine_demand: float = 0.6  # [mg/L as Cl2 equivalent]
     inlet_temperature: float = 20.0  # [°C]
 
     # Chemical dosing streams (physical flows resulting from control actions)
@@ -177,9 +193,12 @@ class BoundaryConditions:
     acid_concentration: float = (
         0.1  # [mol/L] Acid solution concentration (e.g., HCl, H₂SO₄)
     )
+    acid_temperature: float = 20.0  # [°C]
 
     chlorine_flow_rate: float = 0.0  # [L/min] Chlorine solution feed rate
     chlorine_concentration: float = 50.0  # [mg/L] Chlorine solution concentration
+    chlorine_solution_pH: float = 11.5  # [-] sodium hypochlorite stock is strongly basic
+    chlorine_temperature: float = 20.0  # [°C]
 
     # Environmental forcing
     ambient_temperature: float = 20.0  # [°C] Surroundings temperature
@@ -197,7 +216,7 @@ class IntegratedCSTR:
     - Temperature effects
     - Mass and energy conservation
 
-    Pure physics model - no sensor or control logic.
+    Physics model only; sensor and control logic are handled elsewhere.
     """
 
     def __init__(self, config: ReactorConfiguration):
@@ -217,13 +236,21 @@ class IntegratedCSTR:
         self.state = ReactorState(
             pH=np.full(config.n_zones, config.initial_pH),
             chlorine=np.full(config.n_zones, config.initial_chlorine),
+            chloramine=np.full(config.n_zones, config.initial_chloramine),
+            ammonia=np.full(config.n_zones, config.initial_ammonia),
+            chlorine_demand=np.full(config.n_zones, config.initial_chlorine_demand),
             temperature=np.full(config.n_zones, config.temperature),
             flow_rate=config.flow_rate,
         )
 
+        residence = (
+            f"{self.transport.residence_time:.1f}min"
+            if self.transport.residence_time is not None
+            else "batch"
+        )
         logger.info(
             f"Reactor initialized: {config.n_zones} zones, "
-            f"V={config.volume}L, τ={self.transport.residence_time:.1f}min"
+            f"V={config.volume}L, τ={residence}"
         )
 
     def _initialize_physics_modules(self):
@@ -278,7 +305,8 @@ class IntegratedCSTR:
         This is the heart of the physics engine - the ODE system that
         governs reactor dynamics.
 
-        State vector y = [pH₀, pH₁, ..., pH_{n-1}, Cl₀, Cl₁, ..., Cl_{n-1}, T₀, T₁, ..., T_{n-1}]
+        State vector:
+        y = [pH₀..pHₙ, Cl_free₀..Cl_freeₙ, T₀..Tₙ, NH3₀..NH3ₙ, Cl_combined₀..Cl_combinedₙ, Demand₀..Demandₙ]
 
         Args:
             t: Current time [s]
@@ -294,11 +322,17 @@ class IntegratedCSTR:
         pH_zones = y[0:n]
         Cl_zones = y[n : 2 * n]
         T_zones = y[2 * n : 3 * n]
+        NH3_zones = y[3 * n : 4 * n]
+        Cl_combined_zones = y[4 * n : 5 * n]
+        demand_zones = y[5 * n : 6 * n]
 
         # Initialize derivatives
         dpH_dt = np.zeros(n)
         dCl_dt = np.zeros(n)
         dT_dt = np.zeros(n)
+        dNH3_dt = np.zeros(n)
+        dCl_combined_dt = np.zeros(n)
+        dDemand_dt = np.zeros(n)
 
         # Update spatial model with current temperatures
         self.spatial.update_density_profile(T_zones)
@@ -331,96 +365,151 @@ class IntegratedCSTR:
             # Diagonal should be negative of off-diagonal sum to conserve mass
             K_matrix[i, i] = -off_diagonal_sum
 
-        # Special handling for outlet zone: restore outlet flow term
-        # The outlet zone needs additional -Q/V term for mass leaving system
-        Q_per_V = (boundary.inlet_flow_rate / 60) / self.config.volume  # [1/s]
-        K_matrix[n - 1, n - 1] -= Q_per_V
+        # Total flow controls hydraulic residence. Dosing streams are real hydraulic inflows.
+        Q_main = max(0.0, boundary.inlet_flow_rate)
+        Q_acid = max(0.0, boundary.acid_flow_rate)
+        Q_chlorine = max(0.0, boundary.chlorine_flow_rate)
+        Q_total = Q_main + Q_acid + Q_chlorine
+
+        # Through-flow intensity [1/s] for compartment advection.
+        Q_per_V = (Q_total / 60.0) / self.config.volume if Q_total > 0 else 0.0  # [1/s]
+
+        # Mixed influent quality from all hydraulic inflows.
+        if Q_total > 0:
+            H_main = 10 ** (-boundary.inlet_pH)
+            H_acid = max(boundary.acid_concentration, 1e-12)  # strong-acid approximation
+            H_chlorine = 10 ** (-boundary.chlorine_solution_pH)
+
+            H_in_mixed = (
+                Q_main * H_main + Q_acid * H_acid + Q_chlorine * H_chlorine
+            ) / Q_total
+            Cl_in_mixed = (
+                Q_main * boundary.inlet_chlorine
+                + Q_chlorine * boundary.chlorine_concentration
+            ) / Q_total
+            NH3_in_mixed = (Q_main * boundary.inlet_ammonia) / Q_total
+            Cl_combined_in_mixed = (Q_main * boundary.inlet_chloramine) / Q_total
+            demand_in_mixed = (Q_main * boundary.inlet_chlorine_demand) / Q_total
+            T_in_mixed = (
+                Q_main * boundary.inlet_temperature
+                + Q_acid * boundary.acid_temperature
+                + Q_chlorine * boundary.chlorine_temperature
+            ) / Q_total
+        else:
+            H_in_mixed = 10 ** (-pH_zones[0])
+            Cl_in_mixed = Cl_zones[0]
+            NH3_in_mixed = NH3_zones[0]
+            Cl_combined_in_mixed = Cl_combined_zones[0]
+            demand_in_mixed = demand_zones[0]
+            T_in_mixed = T_zones[0]
 
         # --- pH DYNAMICS ---
         # pH changes due to:
-        # 1. Acid dosing (inlet zone only)
-        # 2. Inlet flow (zone 0)
-        # 3. Mixing between zones
-        # 4. Chemical equilibration (buffering)
+        # 1. Mixed influent H+ concentration
+        # 2. Inter-zone mixing
+        # 3. Carbonate buffering
+        H_zones = 10 ** (-pH_zones)  # [mol/L]
+        dH_dt = K_matrix @ H_zones
 
-        H_zones = 10 ** (-pH_zones)  # Convert to H+ concentration
+        # Through-tank advection: each zone receives upstream concentration and
+        # discharges downstream concentration at the same hydraulic rate.
+        if Q_per_V > 0:
+            dH_dt[1:] += Q_per_V * (H_zones[:-1] - H_zones[1:])
 
-        # 1. Acid dosing effect (zone 0)
-        if boundary.acid_flow_rate > 0:
-            zone_volume_L = self.config.volume / n
-            H_added_per_s = (
-                boundary.acid_flow_rate / 60
-            ) * boundary.acid_concentration  # mol/s
-            dH_dt_dosing = H_added_per_s / zone_volume_L  # mol/L/s
-
-            # Convert to dpH/dt using chain rule
-            beta = self.chemistry.buffering_capacity(pH_zones[0])
-            if beta > 0:
-                dpH_dt[0] += -dH_dt_dosing / (beta * np.log(10))
-
-        # 2. Inlet flow effect (zone 0)
-        Q_per_V = (boundary.inlet_flow_rate / 60) / self.config.volume  # [1/s]
-        H_inlet = 10 ** (-boundary.inlet_pH)
-        dH_dt_inlet = Q_per_V * (H_inlet - H_zones[0])
-
-        beta_0 = self.chemistry.buffering_capacity(pH_zones[0])
-        if beta_0 > 0:
-            dpH_dt[0] += -dH_dt_inlet / (beta_0 * np.log(10))
-
-        # 3. Mixing between zones
-        dH_dt_mixing = K_matrix @ H_zones
+        # Inlet boundary enters zone 0.
+        dH_dt[0] += Q_per_V * (H_in_mixed - H_zones[0])
 
         for i in range(n):
             beta_i = self.chemistry.buffering_capacity(pH_zones[i])
             if beta_i > 0:
-                dpH_dt[i] += -dH_dt_mixing[i] / (beta_i * np.log(10))
+                dpH_dt[i] += -dH_dt[i] / (beta_i * np.log(10))
 
-        # --- CHLORINE DYNAMICS ---
-        # Chlorine changes due to:
-        # 1. Dosing (inlet zone)
-        # 2. Inlet flow
-        # 3. Mixing between zones
-        # 4. First-order decay (temperature AND pH dependent)
+        # --- FREE CHLORINE / AMMONIA / CHLORAMINE / DEMAND DYNAMICS ---
+        # Advective boundary exchange in inlet zone
+        dCl_dt[0] += Q_per_V * (Cl_in_mixed - Cl_zones[0])
+        dNH3_dt[0] += Q_per_V * (NH3_in_mixed - NH3_zones[0])
+        dCl_combined_dt[0] += Q_per_V * (Cl_combined_in_mixed - Cl_combined_zones[0])
+        dDemand_dt[0] += Q_per_V * (demand_in_mixed - demand_zones[0])
 
-        zone_volume_L = self.config.volume / n
-
-        # 1. Chlorine dosing (zone 0)
-        if boundary.chlorine_flow_rate > 0:
-            Cl_added_per_s = (
-                boundary.chlorine_flow_rate / 60
-            ) * boundary.chlorine_concentration  # mg/s
-            dCl_dt[0] += Cl_added_per_s / zone_volume_L  # mg/L/s
-
-        # 2. Inlet flow (zone 0)
-        dCl_dt[0] += Q_per_V * (boundary.inlet_chlorine - Cl_zones[0])
-
-        # 3. Mixing
+        # Inter-zone exchange
         dCl_dt += K_matrix @ Cl_zones
+        dNH3_dt += K_matrix @ NH3_zones
+        dCl_combined_dt += K_matrix @ Cl_combined_zones
+        dDemand_dt += K_matrix @ demand_zones
 
-        # 4. Decay (temperature AND pH dependent)
+        # Through-tank advection (zone i-1 -> zone i).
+        if Q_per_V > 0:
+            dCl_dt[1:] += Q_per_V * (Cl_zones[:-1] - Cl_zones[1:])
+            dNH3_dt[1:] += Q_per_V * (NH3_zones[:-1] - NH3_zones[1:])
+            dCl_combined_dt[1:] += Q_per_V * (
+                Cl_combined_zones[:-1] - Cl_combined_zones[1:]
+            )
+            dDemand_dt[1:] += Q_per_V * (demand_zones[:-1] - demand_zones[1:])
+
+        # Reaction kinetics (lumped but physically grounded):
+        # 1) Free chlorine self-decay
+        # 2) NH3 + HOCl -> chloramines (consumes free chlorine and ammonia)
+        # 3) Free chlorine demand from bulk reducing agents/organics
+        CL2_PER_N_MASS = 70.906 / 14.007  # stoichiometric mg Cl2 per mg N
+        K_CHLORAMINE_REF = 1.2e-3  # [L/(mg*s)] at 20°C for NH3-N basis
+        K_DEMAND_REF = 3.0e-4  # [L/(mg*s)] at 20°C
+        K_CHLORAMINE_DECAY_REF = 1.5e-5  # [1/s] at 20°C
+
         for i in range(n):
-            # Base temperature-dependent decay rate
-            k_base = self.thermo.chlorine_decay_rate(T_zones[i])
+            T = T_zones[i]
+            pH = pH_zones[i]
 
-            # pH-dependent multiplier (HOCl decays ~50x faster than OCl⁻)
-            pH_factor = self.chemistry.pH_dependent_chlorine_decay_factor(pH_zones[i])
+            # 1) Free chlorine self-decay
+            k_base = self.thermo.chlorine_decay_rate(T)
+            pH_factor = self.chemistry.pH_dependent_chlorine_decay_factor(pH)
+            free_decay = k_base * pH_factor * Cl_zones[i]
 
-            # Effective decay rate
-            k_effective = k_base * pH_factor
+            # Hypochlorous acid fraction controls chlorine reactivity.
+            # HOCl is much more reactive than OCl- for most reactions.
+            pKa_hocl = 7.5 + 0.01 * (T - 25.0)
+            hocl_fraction = 1.0 / (1.0 + 10 ** (pH - pKa_hocl))
 
-            dCl_dt[i] -= k_effective * Cl_zones[i]
+            # 2) Chloramine formation from ammonia (via NH3 free-base fraction)
+            pKa_nh4 = 9.25 - 0.03 * (T - 25.0)
+            nh3_fraction = 1.0 / (1.0 + 10 ** (pKa_nh4 - pH))
+            k_temp_chloramine = 1.6 ** ((T - 20.0) / 10.0)
+            k_chloramine = (
+                K_CHLORAMINE_REF
+                * k_temp_chloramine
+                * nh3_fraction
+                * hocl_fraction
+            )
+            nh3_consumption = k_chloramine * Cl_zones[i] * NH3_zones[i]  # [mgN/L/s]
+            free_from_nh3 = CL2_PER_N_MASS * nh3_consumption  # [mgCl2/L/s]
+
+            # 3) Bulk chlorine demand (organics/reducing agents lumped)
+            k_temp_demand = 1.4 ** ((T - 20.0) / 10.0)
+            demand_consumption = (
+                K_DEMAND_REF
+                * k_temp_demand
+                * Cl_zones[i]
+                * demand_zones[i]
+                * (0.2 + 0.8 * hocl_fraction)
+            )  # [mgCl2/L/s]
+
+            # Combined chlorine decay (much slower than free chlorine)
+            k_chloramine_decay = K_CHLORAMINE_DECAY_REF * k_temp_demand
+            chloramine_decay = k_chloramine_decay * Cl_combined_zones[i]
+
+            dCl_dt[i] -= free_decay + free_from_nh3 + demand_consumption
+            dNH3_dt[i] -= nh3_consumption
+            dDemand_dt[i] -= demand_consumption
+            dCl_combined_dt[i] += free_from_nh3 - chloramine_decay
 
         # --- TEMPERATURE DYNAMICS ---
         # Temperature changes due to:
-        # 1. Inlet flow
-        # 2. Mixing between zones
+        # 1. Mixed influent stream
+        # 2. Inter-zone exchange + through-tank advection
         # 3. Heat loss to environment
-
-        # 1. Inlet flow (zone 0)
-        dT_dt[0] += Q_per_V * (boundary.inlet_temperature - T_zones[0])
-
-        # 2. Mixing (with stratification effects already in K_matrix)
+        dT_dt[0] += Q_per_V * (T_in_mixed - T_zones[0])
         dT_dt += K_matrix @ T_zones
+        if Q_per_V > 0:
+            dT_dt[1:] += Q_per_V * (T_zones[:-1] - T_zones[1:])
 
         # 3. Heat loss to environment (if specified)
         if boundary.heat_loss_coefficient > 0:
@@ -443,7 +532,9 @@ class IntegratedCSTR:
                 dT_dt[i] -= Q_loss_W / (rho * cp * V_m3)
 
         # Combine all derivatives
-        dydt = np.concatenate([dpH_dt, dCl_dt, dT_dt])
+        dydt = np.concatenate(
+            [dpH_dt, dCl_dt, dT_dt, dNH3_dt, dCl_combined_dt, dDemand_dt]
+        )
 
         return dydt
 
@@ -465,7 +556,14 @@ class IntegratedCSTR:
         """
         # Pack state into ODE vector
         y0 = np.concatenate(
-            [self.state.pH, self.state.chlorine, self.state.temperature]
+            [
+                self.state.pH,
+                self.state.chlorine,
+                self.state.temperature,
+                self.state.ammonia,
+                self.state.chloramine,
+                self.state.chlorine_demand,
+            ]
         )
 
         # Solve ODE over interval [t, t+dt]
@@ -493,6 +591,9 @@ class IntegratedCSTR:
         self.state.pH = y_final[0:n]
         self.state.chlorine = y_final[n : 2 * n]
         self.state.temperature = y_final[2 * n : 3 * n]
+        self.state.ammonia = y_final[3 * n : 4 * n]
+        self.state.chloramine = y_final[4 * n : 5 * n]
+        self.state.chlorine_demand = y_final[5 * n : 6 * n]
         self.state.time += dt
         self.state.flow_rate = (
             boundary.inlet_flow_rate
@@ -535,6 +636,23 @@ class IntegratedCSTR:
             logger.warning(f"Negative chlorine detected: {self.state.chlorine}")
             self.state.chlorine = np.maximum(self.state.chlorine, 0.0)
 
+        # Combined chlorine cannot be negative
+        if np.any(self.state.chloramine < 0):
+            logger.warning(f"Negative chloramine detected: {self.state.chloramine}")
+            self.state.chloramine = np.maximum(self.state.chloramine, 0.0)
+
+        # Ammonia cannot be negative
+        if np.any(self.state.ammonia < 0):
+            logger.warning(f"Negative ammonia detected: {self.state.ammonia}")
+            self.state.ammonia = np.maximum(self.state.ammonia, 0.0)
+
+        # Chlorine demand precursor cannot be negative
+        if np.any(self.state.chlorine_demand < 0):
+            logger.warning(
+                f"Negative chlorine demand detected: {self.state.chlorine_demand}"
+            )
+            self.state.chlorine_demand = np.maximum(self.state.chlorine_demand, 0.0)
+
         # Temperature must be reasonable
         if np.any(self.state.temperature < 0) or np.any(self.state.temperature > 100):
             logger.error(f"Temperature out of bounds: {self.state.temperature}")
@@ -546,7 +664,7 @@ class IntegratedCSTR:
 
         Args:
             zone_idx: Zone index (0 = bottom/inlet, n-1 = top/outlet)
-            parameter: 'pH', 'chlorine', 'temperature', 'density'
+            parameter: 'pH', 'chlorine', 'chloramine', 'ammonia', 'chlorine_demand', 'temperature', 'density'
 
         Returns:
             Physical value at that location
@@ -560,6 +678,12 @@ class IntegratedCSTR:
             return self.state.pH[zone_idx]
         elif parameter == "chlorine":
             return self.state.chlorine[zone_idx]
+        elif parameter == "chloramine":
+            return self.state.chloramine[zone_idx]
+        elif parameter == "ammonia":
+            return self.state.ammonia[zone_idx]
+        elif parameter == "chlorine_demand":
+            return self.state.chlorine_demand[zone_idx]
         elif parameter == "temperature":
             return self.state.temperature[zone_idx]
         elif parameter == "density":
@@ -571,7 +695,7 @@ class IntegratedCSTR:
         """
         Validate mass and energy conservation.
 
-        CRITICAL for verifying physics implementation correctness.
+        Useful for checking mass and energy consistency during runs.
 
         Returns:
             Dictionary with conservation metrics
@@ -580,6 +704,8 @@ class IntegratedCSTR:
 
         # Total chlorine mass
         total_chlorine_mg = np.sum(self.state.chlorine) * zone_volume
+        total_chloramine_mg = np.sum(self.state.chloramine) * zone_volume
+        total_chlorine_equivalent_mg = total_chlorine_mg + total_chloramine_mg
 
         # Total H+ and OH-
         total_H_mol = np.sum(self.state.H_concentration) * zone_volume / 1000
@@ -602,6 +728,8 @@ class IntegratedCSTR:
 
         return {
             "total_chlorine_mg": total_chlorine_mg,
+            "total_chloramine_mg": total_chloramine_mg,
+            "total_chlorine_equivalent_mg": total_chlorine_equivalent_mg,
             "total_H_mol": total_H_mol,
             "total_OH_mol": total_OH_mol,
             "charge_balance_mol": charge_balance,
@@ -617,21 +745,28 @@ class IntegratedCSTR:
         print("=" * 70)
 
         print(f"\nTime: {self.state.time:.1f} s")
-        print(f"Residence time: {self.transport.residence_time:.1f} min")
+        if self.transport.residence_time is None:
+            print("Residence time: batch mode")
+        else:
+            print(f"Residence time: {self.transport.residence_time:.1f} min")
         print(f"Mixing time: {self.transport.mixing_time_seconds:.1f} s")
 
-        print(f"\n{'Zone':<6} {'pH':<8} {'Cl(mg/L)':<10} {'T(°C)':<8} {'ρ(kg/m³)':<10}")
-        print("-" * 50)
+        print(
+            f"\n{'Zone':<6} {'pH':<8} {'FreeCl':<10} {'ClNH2':<10} {'NH3-N':<10} {'T(°C)':<8}"
+        )
+        print("-" * 65)
         for i in range(self.config.n_zones):
             print(
                 f"{i:<6} {self.state.pH[i]:<8.3f} {self.state.chlorine[i]:<10.3f} "
-                f"{self.state.temperature[i]:<8.2f} {self.state.density[i]:<10.2f}"
+                f"{self.state.chloramine[i]:<10.3f} {self.state.ammonia[i]:<10.3f} "
+                f"{self.state.temperature[i]:<8.2f}"
             )
 
         # Conservation
         conservation = self.validate_conservation()
         print("\nConservation Laws:")
         print(f"  Total Chlorine: {conservation['total_chlorine_mg']:.2f} mg")
+        print(f"  Total Chloramine: {conservation['total_chloramine_mg']:.2f} mg")
         print(f"  Charge Balance: {conservation['charge_balance_mol']:.2e} mol")
 
         # Mixing quality
@@ -808,7 +943,7 @@ if __name__ == "__main__":
     validate_integrated_reactor()
 
     print("\n" + "=" * 70)
-    print("PHYSICS ENGINE VALIDATED")
+    print("PHYSICS ENGINE CHECKS PASSED")
     print("=" * 70)
     print("All modules integrated and validated:")
     print("  ✓ Thermodynamics (Arrhenius kinetics)")
@@ -816,5 +951,5 @@ if __name__ == "__main__":
     print("  ✓ Transport (turbulent mixing, diffusion)")
     print("  ✓ Spatial (stratification, multi-zone)")
     print("  ✓ Reactor (complete CSTR dynamics)")
-    print("\nPure physics model - no control system logic.")
+    print("\nPhysics model only; control logic is external.")
     print("=" * 70)

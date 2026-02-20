@@ -1,11 +1,7 @@
 """
-Main Simulation Orchestrator (HARDENED)
-========================================
+Main simulation orchestrator.
 
-Security-hardened entry point for water treatment reactor simulation.
-
-Author: Guilherme F. G. Santos (hardened)
-Date: January 2026
+Entry point for the water treatment simulator runtime.
 """
 
 import argparse
@@ -13,11 +9,14 @@ import time
 import logging
 import signal
 import sys
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Any
 from contextlib import suppress
 
 # Physics engine
 from .core import IntegratedCSTR, ReactorConfiguration, BoundaryConditions, ReactorState
+
+# Actuators
+from .actuators import create_realistic_actuator_suite
 
 # Sensors
 from .sensors import (
@@ -27,10 +26,21 @@ from .sensors import (
     SensorFault,
 )
 
-# Modbus (use hardened version)
-from .modbus import ModbusSlave, ModbusRegisterMap, ModbusServerConfig
+# Modbus (optional dependency)
+MODBUS_AVAILABLE = True
+MODBUS_IMPORT_ERROR: Optional[str] = None
+try:
+    from .modbus import ModbusSlave, ModbusRegisterMap, ModbusServerConfig
+except ModuleNotFoundError as exc:
+    if exc.name != "pymodbus":
+        raise
+    MODBUS_AVAILABLE = False
+    MODBUS_IMPORT_ERROR = str(exc)
+    ModbusSlave = Any  # type: ignore
+    ModbusRegisterMap = Any  # type: ignore
+    ModbusServerConfig = Any  # type: ignore
 
-# Configure logging (no verbose stack traces in production)
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -53,7 +63,7 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 
-# Security: Input validation functions (zero-trust principle)
+# Input validation helpers
 def validate_flow_rate(value: float, max_value: float = 20.0) -> float:
     """Validate and clamp flow rate within safe bounds."""
     if not isinstance(value, (int, float)):
@@ -105,16 +115,16 @@ def initialize_sensors(config, sim_start_time: float, verbose: bool = False):
                 sensor.calibrate(config.flow_rate, sim_start_time, "system_init")
 
             if verbose:
-                logger.info(f"  ✓ Calibrated {name}")
+                logger.info(f"  Calibrated {name}")
 
         except Exception:
             calibration_errors += 1
-            logger.warning(f"  ⚠ Could not calibrate {name}")
+            logger.warning(f"  Could not calibrate {name}")
 
     if calibration_errors > len(sensors) // 2:
         raise RuntimeError("Too many sensor calibration failures")
 
-    logger.info(f"✓ Initialized {len(sensors)} sensors ({calibration_errors} errors)")
+    logger.info(f"Initialized {len(sensors)} sensors ({calibration_errors} errors)")
     return sensors
 
 
@@ -151,14 +161,14 @@ def read_all_sensors(
                 raw_value=float("nan"),
                 noise=0.0,
                 drift=0.0,
-                status=SensorStatus.FAULT,
+                status=SensorStatus.FAILED,
                 uncertainty=float("inf"),
-                fault=SensorFault.SENSOR_ERROR,
+                fault=SensorFault.OPEN_CIRCUIT,
             )
 
     # Alert if too many sensors are failing
     if error_count > len(sensors) // 2:
-        logger.error(f"CRITICAL: {error_count}/{len(sensors)} sensors in fault state")
+        logger.error(f"{error_count}/{len(sensors)} sensors in fault state")
 
     return readings
 
@@ -193,6 +203,7 @@ def update_modbus_inputs(
     try:
         # Update analog inputs (input registers)
         slave.update_input_register("pH_inlet", safe_value("pH_inlet"))
+        slave.update_input_register("pH_middle", safe_value("pH_middle"))
         slave.update_input_register("pH_outlet", safe_value("pH_outlet"))
 
         slave.update_input_register("chlorine_inlet", safe_value("chlorine_inlet"))
@@ -226,13 +237,13 @@ def update_modbus_inputs(
 
 def read_modbus_commands(slave: Optional[ModbusSlave]) -> Tuple[float, float, float]:
     """
-    Read actuator commands from Modbus with validation (zero-trust).
+    Read actuator commands from Modbus with range checks.
 
     Returns:
         Tuple of (acid_flow_rate, chlorine_flow_rate, inlet_flow_rate)
     """
     if slave is None or not slave.is_running:
-        return 0.0, 0.0, 5.0  # Safe defaults
+        return 0.0, 0.0, 0.0
 
     try:
         # Read commands with validation
@@ -240,7 +251,7 @@ def read_modbus_commands(slave: Optional[ModbusSlave]) -> Tuple[float, float, fl
         chlorine_rate = slave.read_holding_register("chlorine_flow_rate")
         inlet_rate = slave.read_holding_register("inlet_flow_rate")
 
-        # Apply zero-trust validation
+        # Clamp to configured ranges.
         acid_rate = validate_flow_rate(acid_rate, max_value=2.0)
         chlorine_rate = validate_flow_rate(chlorine_rate, max_value=1.0)
         inlet_rate = validate_flow_rate(inlet_rate, max_value=20.0)
@@ -249,26 +260,137 @@ def read_modbus_commands(slave: Optional[ModbusSlave]) -> Tuple[float, float, fl
 
     except Exception as e:
         logger.error(f"Modbus read failed: {type(e).__name__}")
-        return 0.0, 0.0, 5.0  # Safe defaults
+        return 0.0, 0.0, 0.0
 
 
-def apply_boundary_conditions(
-    boundary: BoundaryConditions, commands: Tuple[float, float, float]
+def read_modbus_enable_bits(slave: Optional[ModbusSlave]) -> Tuple[bool, bool, bool]:
+    """
+    Read actuator and simulation enable bits from Modbus coils.
+
+    Returns:
+        (acid_enabled, chlorine_enabled, simulation_running)
+    """
+    if slave is None or not slave.is_running:
+        return True, True, True
+
+    try:
+        acid_enabled = slave.read_coil("acid_pump_enable")
+        chlorine_enabled = slave.read_coil("chlorine_pump_enable")
+        simulation_running = slave.read_coil("simulation_running")
+        return bool(acid_enabled), bool(chlorine_enabled), bool(simulation_running)
+    except Exception:
+        # Fail-open for operation continuity if comms are degraded
+        return True, True, True
+
+
+def read_modbus_dosing_concentrations(
+    slave: Optional[ModbusSlave], boundary: BoundaryConditions
+) -> Tuple[float, float]:
+    """
+    Read dosing stock concentrations from Modbus holding registers.
+
+    Returns:
+        (acid_concentration_mol_L, chlorine_concentration_mg_L)
+    """
+    if slave is None or not slave.is_running:
+        return boundary.acid_concentration, boundary.chlorine_concentration
+
+    try:
+        acid_conc = slave.read_holding_register("acid_concentration")
+        chlorine_conc = slave.read_holding_register("chlorine_concentration")
+
+        acid_conc = validate_concentration(acid_conc, max_value=5.0)  # mol/L
+        chlorine_conc = validate_concentration(chlorine_conc, max_value=200.0)  # mg/L
+
+        return acid_conc, chlorine_conc
+    except Exception:
+        return boundary.acid_concentration, boundary.chlorine_concentration
+
+
+def initialize_actuators(boundary: BoundaryConditions) -> Dict[str, Any]:
+    """Initialize and prime realistic actuator models."""
+    actuators = create_realistic_actuator_suite(
+        {
+            "max_acid_flow": 2.0,
+            "max_chlorine_flow": 1.0,
+            "max_inlet_flow": 20.0,
+            "acid_pressure_drop": 2.0,
+            "chlorine_discharge_pressure": 2.0,
+            "inlet_pressure_drop": 1.5,
+        }
+    )
+
+    # Prime actuators to initial operating point so simulation starts near steady state.
+    actuators["acid_valve"].set_flow_rate(validate_flow_rate(boundary.acid_flow_rate, 2.0))
+    actuators["chlorine_pump"].set_flow_rate(
+        validate_flow_rate(boundary.chlorine_flow_rate, 1.0)
+    )
+    actuators["inlet_valve"].set_flow_rate(
+        validate_flow_rate(boundary.inlet_flow_rate, 20.0)
+    )
+
+    for _ in range(3):
+        actuators["acid_valve"].step(10.0)
+        actuators["chlorine_pump"].step(10.0)
+        actuators["inlet_valve"].step(10.0)
+
+    return actuators
+
+
+def apply_actuator_commands(
+    actuators: Dict[str, Any],
+    commands: Tuple[float, float, float],
+    enable_bits: Tuple[bool, bool, bool],
+    current_inlet_flow: float,
 ) -> None:
-    """
-    Apply actuator commands to boundary conditions with validation.
-
-    Zero-trust principle: Validate all inputs at the boundary.
-    """
+    """Apply desired flow commands to actuator setpoints."""
     acid_rate, chlorine_rate, inlet_rate = commands
+    acid_enabled, chlorine_enabled, _simulation_running = enable_bits
 
-    # Apply with safety limits (defense in depth)
-    boundary.acid_flow_rate = validate_flow_rate(acid_rate, max_value=2.0)
-    boundary.chlorine_flow_rate = validate_flow_rate(chlorine_rate, max_value=1.0)
+    target_acid = acid_rate if acid_enabled else 0.0
+    target_chlorine = chlorine_rate if chlorine_enabled else 0.0
+    # Respect explicit low-flow/closed commands for main inlet valve.
+    # Keep current flow only for invalid negative values (defensive fallback).
+    target_inlet = inlet_rate if inlet_rate >= 0.0 else current_inlet_flow
 
-    # Only update inlet flow if command is significant
-    if inlet_rate > 0.1:
-        boundary.inlet_flow_rate = validate_flow_rate(inlet_rate, max_value=20.0)
+    actuators["acid_valve"].set_flow_rate(validate_flow_rate(target_acid, 2.0))
+    actuators["chlorine_pump"].set_flow_rate(validate_flow_rate(target_chlorine, 1.0))
+    actuators["inlet_valve"].set_flow_rate(validate_flow_rate(target_inlet, 20.0))
+
+
+def step_actuators_into_boundary(
+    actuators: Dict[str, Any],
+    boundary: BoundaryConditions,
+    dt: float,
+) -> None:
+    """Advance actuator dynamics and map actual outputs into reactor boundary flows."""
+    acid_flow = actuators["acid_valve"].step(dt)
+    chlorine_flow = actuators["chlorine_pump"].step(dt)
+    inlet_flow = actuators["inlet_valve"].step(dt)
+
+    boundary.acid_flow_rate = validate_flow_rate(acid_flow, max_value=2.0)
+    boundary.chlorine_flow_rate = validate_flow_rate(chlorine_flow, max_value=1.0)
+    boundary.inlet_flow_rate = validate_flow_rate(inlet_flow, max_value=20.0)
+
+
+def initialize_modbus_defaults(
+    slave: Optional[ModbusSlave], boundary: BoundaryConditions
+) -> None:
+    """Prime Modbus writable registers/coils with meaningful startup defaults."""
+    if slave is None or not slave.is_running:
+        return
+
+    with suppress(Exception):
+        slave.write_holding_register("acid_flow_rate", boundary.acid_flow_rate)
+        slave.write_holding_register("chlorine_flow_rate", boundary.chlorine_flow_rate)
+        slave.write_holding_register("inlet_flow_rate", boundary.inlet_flow_rate)
+        slave.write_holding_register("acid_concentration", boundary.acid_concentration)
+        slave.write_holding_register(
+            "chlorine_concentration", boundary.chlorine_concentration
+        )
+        slave.write_coil("acid_pump_enable", True)
+        slave.write_coil("chlorine_pump_enable", True)
+        slave.write_coil("simulation_running", True)
 
 
 def main():
@@ -297,7 +419,7 @@ def main():
     args = parser.parse_args()
 
     logger.info("=" * 70)
-    logger.info("WATER TREATMENT REACTOR SIMULATION (HARDENED)")
+    logger.info("WATER TREATMENT REACTOR SIMULATION")
     logger.info("=" * 70)
 
     # ========================================================================
@@ -316,7 +438,7 @@ def main():
         )
 
         reactor = IntegratedCSTR(config)
-        logger.info("✓ Physics engine initialized")
+        logger.info("Physics engine initialized")
 
     except Exception as e:
         logger.error(f"Physics engine initialization failed: {type(e).__name__}")
@@ -327,16 +449,30 @@ def main():
     # ========================================================================
     boundary = BoundaryConditions(
         inlet_flow_rate=5.0,
-        inlet_pH=7.5,
-        inlet_chlorine=0.0,
-        inlet_temperature=20.0,
+        inlet_pH=config.inlet_pH,
+        inlet_chlorine=config.inlet_chlorine,
+        inlet_chloramine=config.inlet_chloramine,
+        inlet_ammonia=config.inlet_ammonia,
+        inlet_chlorine_demand=config.inlet_chlorine_demand,
+        inlet_temperature=config.inlet_temperature,
         acid_flow_rate=0.0,
         acid_concentration=0.1,
         chlorine_flow_rate=0.0,
     )
 
     # ========================================================================
-    # PHASE 3: Initialize Sensors
+    # PHASE 3: Initialize Actuators
+    # ========================================================================
+    logger.info("\n[PHASE 3] Initializing actuator suite...")
+    try:
+        actuators = initialize_actuators(boundary)
+        logger.info("Actuator suite initialized")
+    except Exception as e:
+        logger.error(f"Actuator initialization failed: {type(e).__name__}")
+        sys.exit(1)
+
+    # ========================================================================
+    # PHASE 4: Initialize Sensors
     # ========================================================================
     sim_start_time = time.monotonic()
 
@@ -347,12 +483,17 @@ def main():
         sys.exit(1)
 
     # ========================================================================
-    # PHASE 4: Initialize Modbus Interface
+    # PHASE 5: Initialize Modbus Interface
     # ========================================================================
     slave = None
 
-    if not args.no_modbus:
-        logger.info("\n[PHASE 4] Initializing Modbus server...")
+    if not args.no_modbus and not MODBUS_AVAILABLE:
+        logger.warning(
+            f"\n[PHASE 5] Modbus unavailable ({MODBUS_IMPORT_ERROR}). "
+            "Run with --no-modbus or install pymodbus."
+        )
+    elif not args.no_modbus:
+        logger.info("\n[PHASE 5] Initializing Modbus server...")
 
         reg_map = ModbusRegisterMap()
         modbus_config = ModbusServerConfig(
@@ -366,7 +507,8 @@ def main():
         try:
             slave = ModbusSlave(reg_map, modbus_config)
             slave.start(blocking=False)
-            logger.info(f"✓ Modbus server started on {args.host}:{args.port}")
+            initialize_modbus_defaults(slave, boundary)
+            logger.info(f"Modbus server started on {args.host}:{args.port}")
 
         except RuntimeError as e:
             logger.error(f"Modbus server startup failed: {e}")
@@ -378,12 +520,12 @@ def main():
             logger.warning("Continuing in no-Modbus mode")
             slave = None
     else:
-        logger.info("\n[PHASE 4] Skipping Modbus (--no-modbus)")
+        logger.info("\n[PHASE 5] Skipping Modbus (--no-modbus)")
 
     # ========================================================================
-    # PHASE 5: Main Simulation Loop
+    # PHASE 6: Main Simulation Loop
     # ========================================================================
-    logger.info("\n[PHASE 5] Starting simulation loop...")
+    logger.info("\n[PHASE 6] Starting simulation loop...")
     logger.info("Press Ctrl+C to stop gracefully")
 
     sim_time = 0.0
@@ -393,34 +535,54 @@ def main():
 
     modbus_error_count = 0
     max_modbus_errors = 10
+    state = reactor.state
 
     try:
         while running and sim_time < args.duration:
             step_start = time.monotonic()
-
-            # --- Step 1: Advance physics ---
-            try:
-                state = reactor.step(args.dt, boundary=boundary)
-            except Exception as e:
-                logger.error(f"Physics step failed: {type(e).__name__}")
-                break
-
-            # --- Step 2: Read sensors ---
             current_sim_time = sim_start_time + sim_time
+
+            # --- Step 1: Read external commands ---
+            commands = (
+                boundary.acid_flow_rate,
+                boundary.chlorine_flow_rate,
+                boundary.inlet_flow_rate,
+            )
+            enable_bits = (True, True, True)
+
+            if slave:
+                commands = read_modbus_commands(slave)
+                enable_bits = read_modbus_enable_bits(slave)
+                acid_conc, chlorine_conc = read_modbus_dosing_concentrations(
+                    slave, boundary
+                )
+                boundary.acid_concentration = acid_conc
+                boundary.chlorine_concentration = chlorine_conc
+
+            simulation_enabled = enable_bits[2]
+
+            # --- Step 2: Apply actuator dynamics and run physics ---
+            if simulation_enabled:
+                apply_actuator_commands(
+                    actuators, commands, enable_bits, boundary.inlet_flow_rate
+                )
+                step_actuators_into_boundary(actuators, boundary, args.dt)
+                try:
+                    state = reactor.step(args.dt, boundary=boundary)
+                except Exception as e:
+                    logger.error(f"Physics step failed: {type(e).__name__}")
+                    break
+
+            # --- Step 3: Read sensors ---
             readings = read_all_sensors(sensors, state, current_sim_time, args.verbose)
 
-            # --- Step 3: Update Modbus inputs ---
+            # --- Step 4: Update Modbus inputs ---
             if slave:
                 if not update_modbus_inputs(slave, readings, sim_time):
                     modbus_error_count += 1
                     if modbus_error_count >= max_modbus_errors:
                         logger.error("Too many Modbus errors, disabling interface")
                         slave = None
-
-            # --- Step 4: Read Modbus commands ---
-            if slave:
-                commands = read_modbus_commands(slave)
-                apply_boundary_conditions(boundary, commands)
 
             # --- Periodic logging ---
             if step_count % log_interval == 0:
@@ -442,7 +604,8 @@ def main():
                         f"pH_out={pH_out.value if pH_out else 0:.2f} | "
                         f"Cl_out={cl_out.value if cl_out else 0:.2f} | "
                         f"Flow={flow.value if flow else 0:.1f} | "
-                        f"AcidCmd={boundary.acid_flow_rate:.2f}"
+                        f"AcidSP={commands[0]:.2f} | "
+                        f"AcidAct={boundary.acid_flow_rate:.2f}"
                     )
                 else:
                     logger.info(f"t={sim_time:.0f}s | Sensors warming up...")

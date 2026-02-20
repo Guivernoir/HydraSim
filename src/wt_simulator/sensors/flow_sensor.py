@@ -15,7 +15,7 @@ Key Enhancements for Realism:
 - Velocity profile distortion from installation
 
 Author: Guilherme F. G. Santos
-Date: January 2026
+Date: February 2026
 License: MIT
 """
 
@@ -147,7 +147,7 @@ class FlowSensor(BaseSensor):
         else:
             final_value = self._apply_magnetic_effects(reading.value)
 
-        # Air bubbles cause dropouts (CRITICAL for realism)
+        # Air bubbles can cause short dropouts.
         rng = self._get_rng()
         if self.installation.air_bubble_frequency > 0:
             if rng.random() < self.installation.air_bubble_frequency / 60.0:

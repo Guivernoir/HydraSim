@@ -43,7 +43,7 @@ References:
 - AWWA M12 "Instrumentation and Control"
 
 Author: Guilherme F. G. Santos
-Date: January 2026
+Date: February 2026
 License: MIT
 """
 
@@ -362,7 +362,7 @@ class ChlorineSensor(BaseSensor):
         if not np.isfinite(reading.value):
             return reading
 
-        # Get interferences (CRITICAL for realism)
+        # Account for chemical interferences.
         interference = self._get_interferences(reactor_state)
 
         # Update degradation models
@@ -422,7 +422,7 @@ class ChlorineSensor(BaseSensor):
         """
         rng = self._get_rng()
 
-        # 1. Add interferences (CRITICAL)
+        # 1. Add interferences.
         value_with_interference = value + interference
 
         # 2. Membrane fouling effect

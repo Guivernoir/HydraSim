@@ -2,10 +2,10 @@
 Modbus TCP Slave Server
 =====================================================
 
-Security-hardened Modbus/TCP server with correct async lifecycle.
+Modbus/TCP server with an async lifecycle compatible with pymodbus 3.x.
 
 Author: Guilherme F. G. Santos
-Date: January 2026
+Date: February 2026
 License: MIT
 """
 
@@ -53,10 +53,10 @@ class ModbusServerConfig:
 
 class ModbusSlave:
     """
-    Hardened Modbus TCP slave server with correct async patterns.
+    Modbus TCP slave server using pymodbus async patterns.
 
-    CRITICAL: This version properly handles pymodbus 3.x async requirements
-    by creating the server INSIDE the async context, not before.
+    The server is started inside the event loop context used by
+    `StartAsyncTcpServer`.
     """
 
     def __init__(
@@ -142,6 +142,7 @@ class ModbusSlave:
             reg = self.register_map.get_register_by_name(name)
             if not reg or reg.register_type != RegisterType.INPUT_REGISTER:
                 raise ValueError("Invalid register reference")
+            wire_address = reg.address + 1
 
             # Validate range
             if not (-1e9 <= value <= 1e9):
@@ -150,13 +151,13 @@ class ModbusSlave:
             with self._lock:
                 if reg.data_type == "float32":
                     high, low = self.encoder.float32_to_registers(value)
-                    self.ir_block.setValues(reg.address, [high, low])
+                    self.ir_block.setValues(wire_address, [high, low])
                 elif reg.data_type == "int16":
                     reg_val = self.encoder.int16_to_register(int(value))
-                    self.ir_block.setValues(reg.address, [reg_val])
+                    self.ir_block.setValues(wire_address, [reg_val])
                 elif reg.data_type == "uint16":
                     reg_val = self.encoder.uint16_to_register(int(value))
-                    self.ir_block.setValues(reg.address, [reg_val])
+                    self.ir_block.setValues(wire_address, [reg_val])
 
         except ValueError:
             raise
@@ -169,10 +170,11 @@ class ModbusSlave:
             reg = self.register_map.get_register_by_name(name)
             if not reg or reg.register_type != RegisterType.DISCRETE_INPUT:
                 raise ValueError("Invalid register reference")
+            wire_address = reg.address + 1
 
             with self._lock:
                 coil_val = self.encoder.bool_to_coil(value)
-                self.di_block.setValues(reg.address, [coil_val])
+                self.di_block.setValues(wire_address, [coil_val])
 
         except ValueError:
             raise
@@ -185,16 +187,17 @@ class ModbusSlave:
             reg = self.register_map.get_register_by_name(name)
             if not reg or reg.register_type != RegisterType.HOLDING_REGISTER:
                 raise ValueError("Invalid register reference")
+            wire_address = reg.address + 1
 
             with self._lock:
                 if reg.data_type == "float32":
-                    values = self.hr_block.getValues(reg.address, 2)
+                    values = self.hr_block.getValues(wire_address, 2)
                     return self.decoder.registers_to_float32(values[0], values[1])
                 elif reg.data_type == "int16":
-                    values = self.hr_block.getValues(reg.address, 1)
+                    values = self.hr_block.getValues(wire_address, 1)
                     return self.decoder.register_to_int16(values[0])
                 elif reg.data_type == "uint16":
-                    values = self.hr_block.getValues(reg.address, 1)
+                    values = self.hr_block.getValues(wire_address, 1)
                     return self.decoder.register_to_uint16(values[0])
 
         except ValueError:
@@ -208,9 +211,10 @@ class ModbusSlave:
             reg = self.register_map.get_register_by_name(name)
             if not reg or reg.register_type != RegisterType.COIL:
                 raise ValueError("Invalid register reference")
+            wire_address = reg.address + 1
 
             with self._lock:
-                values = self.co_block.getValues(reg.address, 1)
+                values = self.co_block.getValues(wire_address, 1)
                 return self.decoder.coil_to_bool(values[0])
 
         except ValueError:
@@ -218,12 +222,30 @@ class ModbusSlave:
         except Exception:
             raise ValueError("Coil read failed")
 
+    def write_coil(self, name: str, value: bool):
+        """Write coil value (thread-safe)."""
+        try:
+            reg = self.register_map.get_register_by_name(name)
+            if not reg or reg.register_type != RegisterType.COIL:
+                raise ValueError("Invalid register reference")
+            wire_address = reg.address + 1
+
+            with self._lock:
+                coil_val = self.encoder.bool_to_coil(bool(value))
+                self.co_block.setValues(wire_address, [coil_val])
+
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError("Coil write failed")
+
     def write_holding_register(self, name: str, value: float):
         """Write holding register (thread-safe with validation)."""
         try:
             reg = self.register_map.get_register_by_name(name)
             if not reg or reg.register_type != RegisterType.HOLDING_REGISTER:
                 raise ValueError("Invalid register reference")
+            wire_address = reg.address + 1
 
             if not (-1e9 <= value <= 1e9):
                 raise ValueError("Value out of range")
@@ -231,13 +253,13 @@ class ModbusSlave:
             with self._lock:
                 if reg.data_type == "float32":
                     high, low = self.encoder.float32_to_registers(value)
-                    self.hr_block.setValues(reg.address, [high, low])
+                    self.hr_block.setValues(wire_address, [high, low])
                 elif reg.data_type == "int16":
                     reg_val = self.encoder.int16_to_register(int(value))
-                    self.hr_block.setValues(reg.address, [reg_val])
+                    self.hr_block.setValues(wire_address, [reg_val])
                 elif reg.data_type == "uint16":
                     reg_val = self.encoder.uint16_to_register(int(value))
-                    self.hr_block.setValues(reg.address, [reg_val])
+                    self.hr_block.setValues(wire_address, [reg_val])
 
         except ValueError:
             raise
@@ -246,7 +268,7 @@ class ModbusSlave:
 
     def start(self, blocking: bool = True):
         """
-        Start Modbus server (CRITICAL FIX: proper async initialization).
+        Start Modbus server.
 
         Args:
             blocking: If True, block until server stops
@@ -279,10 +301,7 @@ class ModbusSlave:
 
     def _run_server(self):
         """
-        Run Modbus server (CRITICAL FIX: correct async pattern).
-
-        Key change: Server is created INSIDE the async context using
-        StartAsyncTcpServer, not before the event loop starts.
+        Run Modbus server with an event loop in this thread.
         """
         loop = None
         try:
@@ -291,7 +310,7 @@ class ModbusSlave:
             asyncio.set_event_loop(loop)
             self._event_loop = loop
 
-            # CRITICAL: Run the async server initialization inside the event loop
+            # Run async server startup inside this event loop.
             loop.run_until_complete(self._async_run_server())
 
         except Exception as e:

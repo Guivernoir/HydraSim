@@ -11,7 +11,7 @@ Available Sensors:
 - TemperatureSensor: RTD and thermocouple
 
 Author: Guilherme F. G. Santos
-Date: January 2026
+Date: February 2026
 License: MIT
 """
 
@@ -80,6 +80,11 @@ def create_realistic_sensor_suite(reactor_config):
             sample_line=outlet_sample_line,
             installation=good_installation,
         ),
+        "pH_middle": pHSensor(
+            name="pH_middle",
+            zone_index=reactor_config.n_zones // 2,
+            installation=good_installation,
+        ),
         # Chlorine sensors
         "chlorine_inlet": ChlorineSensor(
             name="chlorine_inlet",
@@ -97,7 +102,7 @@ def create_realistic_sensor_suite(reactor_config):
         "flow_main": FlowSensor(
             name="flow_main",
             sensor_type=FlowSensorType.MAGNETIC,
-            full_scale=reactor_config.flow_rate * 2.0,
+            full_scale=max(reactor_config.flow_rate * 4.0, 25.0),
             installation=good_installation,
         ),
         # Temperature sensors

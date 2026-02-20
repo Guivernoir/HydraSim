@@ -11,12 +11,12 @@ Provides common functionality:
 - Measurement history (bounded buffer)
 - Timestamp generation
 - Physical bounds enforcement
-- Sample line transport delays (CRITICAL for realism)
+- Sample line transport delays
 - Sensor fault detection
 - Warm-up periods
 - Hysteresis effects
 
-Key Enhancements for Realism:
+Modeling Notes:
 - Sample line delays (10-60s typical in real plants)
 - Calibration expiration (sensors need re-cal after time limit)
 - Fault states (open circuit, out of range, power issues)
@@ -31,7 +31,7 @@ Security Features:
 - Monotonic time enforcement
 
 Author: Guilherme F. G. Santos
-Date: January 2026
+Date: February 2026
 License: MIT
 """
 
@@ -148,14 +148,14 @@ class InstallationQuality:
 @dataclass
 class SampleLine:
     """
-    Sample line characteristics - CRITICAL for realism.
+    Sample line characteristics.
 
     In real plants, sensors are often in sample lines with:
     - Transport delay (10-60s typical)
     - Temperature change
     - Dilution effects
 
-    This is the #1 difference between simulation and reality.
+    This often has a large effect in plant deployments.
     """
 
     volume_mL: float = 100.0  # Sample line internal volume
@@ -295,7 +295,7 @@ class BaseSensor(ABC):
         self.calibration_validity_hours = calibration_validity_hours
         self.max_rate_of_change = max_rate_of_change
 
-        # Sample line (CRITICAL for realism)
+        # Sample line model (optional)
         self.sample_line = sample_line
 
         # Installation quality
@@ -517,7 +517,7 @@ class BaseSensor(ABC):
         2. Check warm-up status
         3. Check calibration validity
         4. Get true value from reactor
-        5. Apply sample line transport delay (CRITICAL)
+        5. Apply sample line transport delay
         6. Apply calibration drift
         7. Add measurement noise
         8. Apply response lag (first-order)
@@ -599,7 +599,7 @@ class BaseSensor(ABC):
             # Step 1: Get true physical value
             true_value = self._get_true_value(reactor_state)
 
-            # Step 2: Apply sample line transport delay (CRITICAL for realism)
+            # Step 2: Apply sample line transport delay.
             if self.sample_line is not None:
                 # Get temperature if available
                 if hasattr(reactor_state, "temperature"):
@@ -616,14 +616,27 @@ class BaseSensor(ABC):
             # Step 3: Apply calibration drift
             time_since_calibration = current_time - self.last_calibration_time
             drift_hours = time_since_calibration / 3600.0
-            current_drift = self.drift_rate * drift_hours + self.calibration_offset
-            self.cumulative_drift = current_drift
+            aging_drift = self.drift_rate * drift_hours
+            current_drift = aging_drift + self.calibration_offset
+            self.cumulative_drift = aging_drift
 
             # Step 4: Add Gaussian measurement noise
             noise = rng.normal(0.0, self.precision)
 
-            # Step 5: Apply first-order response lag
-            alpha = 0.5  # More responsive than before (was 0.1)
+            # Step 5: Apply first-order response lag using configured time constant.
+            # Discrete form of x_dot = (u - x) / tau:
+            # alpha = 1 - exp(-dt/tau)
+            if len(self.reading_history) > 0:
+                dt_filter = max(0.0, current_time - self.reading_history[-1].timestamp)
+            else:
+                # First sample after startup/calibration should settle quickly.
+                dt_filter = self.response_time
+
+            if dt_filter > 0:
+                alpha = 1.0 - np.exp(-dt_filter / max(self.response_time, 1e-9))
+            else:
+                alpha = 0.0
+
             raw_with_noise = true_value + noise + current_drift
             self.current_value = (
                 alpha * raw_with_noise + (1 - alpha) * self.current_value
@@ -677,7 +690,9 @@ class BaseSensor(ABC):
                     self.current_value = bounded_value
 
                 # Check for excessive drift (but don't override calibration expired)
-                if abs(current_drift) > 0.1 * (self.max_value - self.min_value):
+                # Calibration offset is an intentional correction and should not
+                # trigger a drift alarm. Only aging drift contributes to warnings.
+                if abs(aging_drift) > 0.1 * (self.max_value - self.min_value):
                     if self.status != SensorStatus.CALIBRATION_EXPIRED:
                         self.status = SensorStatus.DRIFT_WARNING
 
@@ -732,6 +747,7 @@ class BaseSensor(ABC):
 
             # Apply calibration
             self.calibration_offset = offset
+            self.current_value = reference_value
             self.last_calibration_time = current_time
             self.cumulative_drift = 0.0  # Reset drift tracking
             self.status = SensorStatus.NORMAL
