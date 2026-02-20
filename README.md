@@ -1,4 +1,4 @@
-# Water Treatment Simulator
+# HydraSim
 
 Water treatment process simulator with:
 - Multi-zone reactor physics (mixing, advection, pH/chlorine chemistry, temperature)
@@ -6,6 +6,8 @@ Water treatment process simulator with:
 - Sensor dynamics (delay, noise, drift, warm-up, faults)
 - Remote maintenance (Modbus-driven recalibration and hardware-replacement actions)
 - Modbus TCP server for plant-style command/feedback integration
+
+HydraSim is designed to emulate realistic water treatment process behavior for integration and control testing against real-world PLC/SCADA systems. It allows engineers and researchers to prototype control logic, validate operational behaviors, and exercise control loops without access to physical hardware.
 
 The goal is practical plant-behavior emulation for integration and control testing. It is not a full CFD model and should not be treated as design authority for safety-critical decisions.
 
