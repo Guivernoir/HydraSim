@@ -43,7 +43,7 @@ References:
 - AWWA M12 "Instrumentation and Control"
 
 Author: Guilherme F. G. Santos
-Date: February 2026
+Last updated: February 2026
 License: MIT
 """
 
@@ -55,7 +55,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from .base_sensor import BaseSensor, SensorReading, InstallationQuality, SampleLine
+from .base_sensor import BaseSensor, SensorReading, SensorStatus, SensorFault, CalibrationRecord, InstallationQuality, SampleLine
 
 
 class ChlorineSensorType(Enum):
@@ -489,6 +489,12 @@ class ChlorineSensor(BaseSensor):
 
         Should be done every 6-12 months.
 
+        After replacement the sensor enters warm-up and the calibration is
+        marked immediately expired so the operator must perform a fresh
+        calibration.  The calibration offset is explicitly cleared to zero
+        so readings during the re-calibration window are not artificially
+        biased by the pre-replacement process value.
+
         Args:
             current_time: Timestamp
         """
@@ -500,13 +506,34 @@ class ChlorineSensor(BaseSensor):
         if current_time is None:
             current_time = time_module.monotonic()
 
-        self.membrane_fouling = 0.0
-        self.membrane_age_days = 0.0
-        self.electrode_polarization = 0.0
+        with self._state_lock:
+            # Reset hardware wear counters
+            self.membrane_fouling = 0.0
+            self.membrane_age_days = 0.0
+            self.electrode_polarization = 0.0
 
-        # Membrane replacement requires recalibration and warm-up
-        self.power_on_time = current_time
-        self.calibrate(0.0, current_time, operator_id="membrane_replacement")
+            # Restart warm-up timer (new membrane must polarise)
+            self.power_on_time = current_time
+
+            # Zero the calibration offset so readings are not biased by the
+            # pre-replacement process value.  The record below is marked with
+            # validity_hours=0 so _check_calibration_valid() returns False
+            # immediately, forcing a proper field re-calibration.
+            self.calibration_offset = 0.0
+            self.cumulative_drift = 0.0
+            self.status = SensorStatus.CALIBRATION_EXPIRED
+            self.fault = SensorFault.NONE
+
+            record = CalibrationRecord(
+                timestamp=current_time,
+                reference_value=0.0,
+                measured_value=self.current_value,
+                offset=0.0,
+                operator_id="membrane_replacement",
+                validity_hours=0.0,   # Immediately expired — must recalibrate
+                skip_warmup=False,
+            )
+            self.calibration_history.append(record)
 
     def replace_reagent(
         self, current_time: Optional[float] = None, storage_temp: float = 20.0
@@ -515,6 +542,11 @@ class ChlorineSensor(BaseSensor):
         Replace DPD reagent.
 
         Should be done monthly or when potency < 80%.
+
+        After replacement the calibration is marked immediately expired so
+        the operator must perform a fresh calibration.  The calibration
+        offset is cleared to zero to avoid biasing readings during the
+        re-calibration window.
 
         Args:
             current_time: Timestamp
@@ -528,13 +560,30 @@ class ChlorineSensor(BaseSensor):
         if current_time is None:
             current_time = time_module.monotonic()
 
-        self.reagent_potency = 1.0
-        self.reagent_age_days = 0.0
-        self.light_exposure_hours = 0.0
-        self.storage_temperature = storage_temp
+        with self._state_lock:
+            # Reset reagent state
+            self.reagent_potency = 1.0
+            self.reagent_age_days = 0.0
+            self.light_exposure_hours = 0.0
+            self.storage_temperature = storage_temp
 
-        # Record maintenance
-        self.calibrate(0.0, current_time, operator_id="reagent_replacement")
+            # Zero the calibration offset; mark calibration expired so the
+            # operator is forced to perform a fresh field calibration.
+            self.calibration_offset = 0.0
+            self.cumulative_drift = 0.0
+            self.status = SensorStatus.CALIBRATION_EXPIRED
+            self.fault = SensorFault.NONE
+
+            record = CalibrationRecord(
+                timestamp=current_time,
+                reference_value=0.0,
+                measured_value=self.current_value,
+                offset=0.0,
+                operator_id="reagent_replacement",
+                validity_hours=0.0,   # Immediately expired — must recalibrate
+                skip_warmup=True,     # DPD optics are already warm
+            )
+            self.calibration_history.append(record)
 
 
 def validate_chlorine_sensor():

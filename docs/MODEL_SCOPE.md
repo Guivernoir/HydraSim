@@ -23,6 +23,15 @@ This simulator is intended for controls integration, operator training, and soft
 - Optional sample-line transport delay
 - Fault/state reporting
 
+### Maintenance
+- Remote recalibration of sensors over Modbus (single-point, with optional warm-up skip)
+- pH electrode cleaning (water rinse, acid clean)
+- Chlorine sensor hardware replacement (amperometric membrane, DPD reagent)
+- Actuator fault reset and zero/span calibration
+- ControlValve positioner drift reset
+- DosingPump component replacement (diaphragm, check valves, peristaltic tube)
+- Per-action result status published to Modbus input registers
+
 ### Modbus Integration
 - Holding registers/coils for incoming commands
 - Input registers/discrete inputs for process feedback and faults

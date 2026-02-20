@@ -3,7 +3,6 @@
 **Version:** 1.0.0  
 **Author:** Guilherme F. G. Santos  
 **License:** MIT  
-**Date:** January 2026
 
 ## Table of Contents
 
@@ -15,6 +14,7 @@
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Usage Examples](#usage-examples)
+- [Maintenance Subsystem](#maintenance-subsystem)
 - [Edge Cases & Limitations](#edge-cases--limitations)
 - [Validation](#validation)
 - [Integration with Simulation](#integration-with-simulation)
@@ -169,6 +169,75 @@ setpoints = slave.get_all_holding_registers()
 print(setpoints)
 ```
 
+## Maintenance Subsystem
+
+The `wt_simulator.maintenance` package provides remote recalibration and repair of sensors and actuators over Modbus. The `ModbusSlave` acts as the bridge: it polls a dedicated trigger coil, reads the command registers, dispatches to `MaintenanceManager`, writes the result back to status registers, and auto-clears the trigger — all in one call.
+
+### Register Layout
+
+| Space | Address | Name | Type | Description |
+|---|---|---|---|---|
+| Holding | HR 200 | `maintenance_target_id` | uint16 | `MaintenanceTarget` enum value (0–10) |
+| Holding | HR 201 | `maintenance_action_code` | uint16 | `MaintenanceAction` enum value (0–11) |
+| Holding | HR 202–203 | `maintenance_param` | float32 | Action parameter; for CALIBRATE add 1000 to skip warm-up |
+| Coil | Coil 10 | `maintenance_trigger` | bool | Write `True` to fire; auto-cleared after execution |
+| Input | IR 110 | `maintenance_status_code` | uint16 | `MaintenanceStatus` result (0=SUCCESS … 5=PENDING) |
+| Input | IR 111 | `maintenance_last_target` | uint16 | Echo of `target_id` |
+| Input | IR 112 | `maintenance_last_action` | uint16 | Echo of `action_code` |
+
+### Workflow (client side)
+
+1. Write `target_id`   → HR 200  
+2. Write `action_code` → HR 201  
+3. Write `param`       → HR 202–203 (float32; write `0.0` if unused)  
+4. Write `True`        → Coil 10 (trigger)  
+5. Poll IR 110 until value ≠ 5 (PENDING)  
+6. Read IR 110 for final status, IR 111/112 for echo  
+
+### Integration (server side)
+
+Pass a `MaintenanceManager` instance when constructing `ModbusSlave`, then call `slave.poll_maintenance()` once per simulation tick:
+
+```python
+from wt_simulator.maintenance import MaintenanceManager
+from modbus import ModbusSlave, ModbusRegisterMap, ModbusServerConfig
+
+manager = MaintenanceManager(sensors, actuators)
+slave   = ModbusSlave(ModbusRegisterMap(), ModbusServerConfig(), maintenance_manager=manager)
+slave.start(blocking=False)
+
+while simulation_running:
+    state    = reactor.step(dt, boundary)
+    readings = sensors.read_all(state)
+
+    slave.update_input_register("pH_inlet", readings["pH_inlet"].value)
+    # ... other sensors
+
+    # Dispatch any pending maintenance command
+    result = slave.poll_maintenance()
+    if result and not result.success:
+        logging.warning("Maintenance failed: %s", result.message)
+
+    # Read actuator setpoints
+    boundary.acid_flow_rate      = slave.read_holding_register("acid_flow_rate")
+    boundary.chlorine_flow_rate  = slave.read_holding_register("chlorine_flow_rate")
+
+    time.sleep(dt)
+```
+
+`poll_maintenance()` is a no-op (returns `None`) when no `MaintenanceManager` is attached or when the trigger coil is `False`, so it is safe to call unconditionally.
+
+### Target IDs and Action Codes
+
+| ID | Target | Valid actions |
+|---|---|---|
+| 0–2 | pH_inlet / pH_middle / pH_outlet | CALIBRATE, FULL_RESET, CLEAN_WATER, CLEAN_ACID |
+| 3–4 | chlorine_inlet / chlorine_outlet | CALIBRATE, FULL_RESET, REPLACE_MEMBRANE (amperometric), REPLACE_REAGENT (DPD) |
+| 5 | flow_main | CALIBRATE, FULL_RESET |
+| 6–7 | temp_inlet / temp_outlet | CALIBRATE, FULL_RESET |
+| 8, 10 | acid_valve / inlet_valve (ControlValve) | RESET_FAULTS, CALIBRATE_ZERO, RECALIBRATE_POSITIONER |
+| 9 | chlorine_pump (DosingPump) | RESET_FAULTS, CALIBRATE_ZERO, REPLACE_DIAPHRAGM, REPLACE_CHECK_VALVES, REPLACE_TUBE |
+
 ## Edge Cases & Limitations
 
 - **Port 502** may require root/admin on some systems (use >1024 for testing)  
@@ -226,4 +295,4 @@ For questions, contributions, or bugs:
 **Email:** strukturaenterprise@gmail.com  
 **GitHub:** [https://github.com/Guivernoir]
 
-Last Updated: January 28, 2026
+Last Updated: February 20, 2026

@@ -16,6 +16,9 @@ from enum import Enum, auto
 import threading
 import time
 from typing import Optional, Dict, Any
+import secrets
+
+import numpy as np
 
 
 class ActuatorStatus(Enum):
@@ -142,10 +145,19 @@ class BaseActuator(ABC):
         self._command_history = deque(maxlen=max_history)
         self._timestamp_history = deque(maxlen=max_history)
 
+        # Thread-safe, cryptographically seeded RNG (same pattern as sensors)
+        self._rng_lock = threading.Lock()
+        self._rng = np.random.default_rng(seed=secrets.randbits(128))
+
     @property
     def name(self) -> str:
         """Get actuator name."""
         return self._name
+
+    def _get_rng(self) -> np.random.Generator:
+        """Get thread-safe random number generator."""
+        with self._rng_lock:
+            return self._rng
 
     def set_position(self, setpoint: float) -> None:
         """

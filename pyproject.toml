@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "water-treatment-sim"
-version = "1.0.0"
+version = "1.1.0"
 description = "Multi-zone water treatment simulator with reactor physics, sensors, actuators, and Modbus TCP integration"
 readme = "README.md"
 requires-python = ">=3.11"

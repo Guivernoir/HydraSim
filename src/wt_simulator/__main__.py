@@ -26,6 +26,9 @@ from .sensors import (
     SensorFault,
 )
 
+# Maintenance
+from .maintenance import MaintenanceManager
+
 # Modbus (optional dependency)
 MODBUS_AVAILABLE = True
 MODBUS_IMPORT_ERROR: Optional[str] = None
@@ -505,7 +508,8 @@ def main():
         )
 
         try:
-            slave = ModbusSlave(reg_map, modbus_config)
+            maintenance_manager = MaintenanceManager(sensors, actuators)
+            slave = ModbusSlave(reg_map, modbus_config, maintenance_manager=maintenance_manager)
             slave.start(blocking=False)
             initialize_modbus_defaults(slave, boundary)
             logger.info(f"Modbus server started on {args.host}:{args.port}")
@@ -583,6 +587,11 @@ def main():
                     if modbus_error_count >= max_modbus_errors:
                         logger.error("Too many Modbus errors, disabling interface")
                         slave = None
+
+            # --- Step 5: Dispatch maintenance commands ---
+            if slave:
+                with suppress(Exception):
+                    slave.poll_maintenance()
 
             # --- Periodic logging ---
             if step_count % log_interval == 0:

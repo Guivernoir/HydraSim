@@ -40,7 +40,7 @@ References:
 - ISA RP60.6 "Installation, Operation, and Maintenance of pH Sensors"
 
 Author: Guilherme F. G. Santos
-Date: January 2026
+Last updated: February 2026
 License: MIT
 """
 
@@ -54,6 +54,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from .base_sensor import (
     BaseSensor,
     SensorReading,
+    SensorStatus,
+    SensorFault,
+    CalibrationRecord,
     InstallationQuality,
     SampleLine,
 )
@@ -343,6 +346,7 @@ class pHSensor(BaseSensor):
         measured_pH_2: float,
         current_time: Optional[float] = None,
         operator_id: str = "auto",
+        skip_warmup: bool = False,
     ) -> None:
         """
         Perform two-point pH calibration.
@@ -390,7 +394,7 @@ class pHSensor(BaseSensor):
         self.reference_contamination = 0.0
 
         # Use standard single-point calibration for base class
-        self.calibrate(mid_buffer_pH, current_time, operator_id)
+        self.calibrate(mid_buffer_pH, current_time, operator_id=operator_id, skip_warmup=skip_warmup)
 
     def clean_electrode(
         self, cleaning_method: str, current_time: Optional[float] = None
@@ -412,26 +416,27 @@ class pHSensor(BaseSensor):
         if current_time is None:
             current_time = time_module.monotonic()
 
-        if cleaning_method == "water_rinse":
-            # Removes 50% of fouling
-            self.membrane_fouling *= 0.5
-        elif cleaning_method == "acid_clean":
-            # Removes 90% of mineral deposits
-            self.membrane_fouling *= 0.1
-            # But etches glass slightly (permanent damage)
-            self.glass_etching += 0.001
-            # Glass etching reduces slope percentage permanently
-            self.slope_percentage -= self.glass_etching * 10.0  # 1% per 0.1 etching
-        elif cleaning_method == "pepsin_clean":
-            # Removes organic fouling
-            self.membrane_fouling *= 0.2
-        else:
-            raise ValueError(f"Unknown cleaning method: {cleaning_method}")
+        with self._state_lock:
+            if cleaning_method == "water_rinse":
+                # Removes 50% of fouling
+                self.membrane_fouling *= 0.5
+            elif cleaning_method == "acid_clean":
+                # Removes 90% of mineral deposits
+                self.membrane_fouling *= 0.1
+                # But etches glass slightly (permanent damage)
+                self.glass_etching += 0.001
+                # Glass etching reduces slope percentage permanently
+                self.slope_percentage -= self.glass_etching * 10.0  # 1% per 0.1 etching
+            elif cleaning_method == "pepsin_clean":
+                # Removes organic fouling
+                self.membrane_fouling *= 0.2
+            else:
+                raise ValueError(f"Unknown cleaning method: {cleaning_method}")
 
-        self.days_since_cleaning = 0.0
+            self.days_since_cleaning = 0.0
 
-        # Cleaning requires warm-up time
-        self.power_on_time = current_time
+            # Cleaning requires warm-up time
+            self.power_on_time = current_time
 
     def check_slope_health(self) -> Dict[str, float]:
         """

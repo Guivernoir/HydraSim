@@ -4,6 +4,7 @@ Water treatment process simulator with:
 - Multi-zone reactor physics (mixing, advection, pH/chlorine chemistry, temperature)
 - Actuator dynamics (valves and dosing pump behavior)
 - Sensor dynamics (delay, noise, drift, warm-up, faults)
+- Remote maintenance (Modbus-driven recalibration and hardware-replacement actions)
 - Modbus TCP server for plant-style command/feedback integration
 
 The goal is practical plant-behavior emulation for integration and control testing. It is not a full CFD model and should not be treated as design authority for safety-critical decisions.
@@ -17,6 +18,7 @@ Runtime loop:
 4. Step reactor physics.
 5. Read sensors from reactor state.
 6. Publish sensor values/status to Modbus input registers/discrete inputs.
+7. Poll maintenance trigger coil; dispatch any pending maintenance action.
 
 This keeps command sources external while the simulator acts like a field-facing process unit.
 
@@ -39,13 +41,13 @@ pip install -e ".[modbus]"
 With Modbus:
 
 ```bash
-python -m wt_simulator --host 127.0.0.1 --port 5020
+python -m src.wt_simulator --host 127.0.0.1 --port 5020
 ```
 
 Without Modbus:
 
 ```bash
-python -m wt_simulator --no-modbus --duration 120 --dt 1
+python -m src.wt_simulator --no-modbus --duration 120 --dt 1
 ```
 
 ## Test
@@ -59,6 +61,7 @@ python -m wt_simulator --no-modbus --duration 120 --dt 1
 - `src/wt_simulator/core`: reactor physics and transport/chemistry models
 - `src/wt_simulator/actuators`: valves and dosing pump dynamics
 - `src/wt_simulator/sensors`: sensor models and suite factory
+- `src/wt_simulator/maintenance`: remote recalibration and hardware-replacement manager
 - `src/wt_simulator/modbus`: register map, encoding, and Modbus server
 - `src/wt_simulator/__main__.py`: runtime orchestration loop
 - `tests`: unit and end-to-end Modbus tests
@@ -66,7 +69,7 @@ python -m wt_simulator --no-modbus --duration 120 --dt 1
 ## Documentation
 
 - `docs/MODEL_SCOPE.md`: what the model includes and what it does not
-- `docs/MODBUS_INTERFACE.md`: command/feedback register behavior and control loop mapping
+- `docs/MODBUS_INTERFACE.md`: command/feedback register behavior, control loop mapping, and maintenance register protocol
 
 ## License
 

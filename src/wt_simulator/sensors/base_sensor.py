@@ -15,13 +15,14 @@ Provides common functionality:
 - Sensor fault detection
 - Warm-up periods
 - Hysteresis effects
+- Remote maintenance support (skip_warmup for field re-calibration)
 
 Modeling Notes:
 - Sample line delays (10-60s typical in real plants)
 - Calibration expiration (sensors need re-cal after time limit)
 - Fault states (open circuit, out of range, power issues)
 - Warm-up requirements (sensors need stabilization time)
-- Hysteresis (different readings on rising vs falling)
+- Hysteresis (direction-dependent behavior)
 - Installation quality effects (flow velocity, bubbles)
 
 Security Features:
@@ -31,7 +32,7 @@ Security Features:
 - Monotonic time enforcement
 
 Author: Guilherme F. G. Santos
-Date: February 2026
+Last updated: February 2026
 License: MIT
 """
 
@@ -114,6 +115,7 @@ class CalibrationRecord:
     operator_id: str = "auto"
     notes: str = ""
     validity_hours: float = 24.0  # How long calibration is valid
+    skip_warmup: bool = False  # Whether warmup was bypassed (remote maintenance)
 
     def is_expired(self, current_time: float) -> bool:
         """Check if this calibration has expired."""
@@ -230,6 +232,7 @@ class BaseSensor(ABC):
     - Fault detection
     - Warm-up periods
     - Hysteresis
+    - Remote recalibration with optional warm-up bypass
 
     Security Properties:
     - Bounded memory: all buffers use deque with maxlen
@@ -719,6 +722,7 @@ class BaseSensor(ABC):
         current_time: Optional[float] = None,
         operator_id: str = "auto",
         validity_hours: Optional[float] = None,
+        skip_warmup: bool = False,
     ) -> CalibrationRecord:
         """
         Calibrate sensor against known reference.
@@ -726,14 +730,29 @@ class BaseSensor(ABC):
         Calculates offset between reference and current reading,
         then resets calibration to this offset.
 
-        Args:
-            reference_value: Known true value
-            current_time: Timestamp of calibration
-            operator_id: Who performed calibration
-            validity_hours: Override default calibration validity
+        Parameters
+        ----------
+        reference_value : float
+            Known true value to calibrate against.
+        current_time : float, optional
+            Monotonic timestamp of calibration event.
+        operator_id : str
+            Who or what performed the calibration (e.g. "auto", "modbus_remote",
+            "technician").
+        validity_hours : float, optional
+            Override default calibration validity window.
+        skip_warmup : bool
+            When True the warm-up timer is NOT reset after calibration.
+            Use this for remote/automated re-calibrations where the sensor
+            has already been running and the membrane/electrode is stable.
+            When False (default) the sensor enters WARMING_UP until the
+            full ``warmup_time_s`` has elapsed, matching behaviour after a
+            physical replacement or initial power-on.
 
-        Returns:
-            CalibrationRecord documenting the calibration
+        Returns
+        -------
+        CalibrationRecord
+            Full record of the calibration event including the skip_warmup flag.
         """
         with self._state_lock:
             if current_time is None:
@@ -753,8 +772,11 @@ class BaseSensor(ABC):
             self.status = SensorStatus.NORMAL
             self.fault = SensorFault.NONE
 
-            # Reset warm-up timer (calibration requires stabilization)
-            self.power_on_time = current_time
+            # Warm-up control:
+            #   skip_warmup=False → reset timer (standard physical replacement)
+            #   skip_warmup=True  → sensor already warm; keep power_on_time unchanged
+            if not skip_warmup:
+                self.power_on_time = current_time
 
             # Record calibration event
             record = CalibrationRecord(
@@ -764,6 +786,7 @@ class BaseSensor(ABC):
                 offset=offset,
                 operator_id=operator_id,
                 validity_hours=validity_hours or self.calibration_validity_hours,
+                skip_warmup=skip_warmup,
             )
 
             self.calibration_history.append(record)

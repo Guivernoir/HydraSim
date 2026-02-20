@@ -14,7 +14,6 @@ Implements pneumatic and electric control valves with:
 from .base_actuator import BaseActuator, ActuatorFault
 from .valve_characteristics import ValveType, ValveCharacteristics
 from enum import Enum, auto
-import random
 import math
 
 
@@ -222,8 +221,9 @@ class ControlValve(BaseActuator):
         drift_per_second = (self._positioner_drift_rate / 3600.0) * (
             1.0 + self._wear_factor
         )
+        rng = self._get_rng()
         self._accumulated_drift += (
-            random.uniform(-drift_per_second, drift_per_second) * dt
+            rng.uniform(-drift_per_second, drift_per_second) * dt
         )
 
         # Limit drift accumulation
@@ -283,6 +283,22 @@ class ControlValve(BaseActuator):
         super().calibrate_zero()
         with self._state_lock:
             self._accumulated_drift = 0.0
+
+    def recalibrate_positioner(self) -> None:
+        """
+        Recalibrate the positioner to eliminate accumulated drift.
+
+        Called by MaintenanceManager for the RECALIBRATE_POSITIONER action.
+        Unlike a full calibrate_zero() this does not move the valve to 0% —
+        it only resets the drift accumulator and clears the CALIBRATION fault,
+        leaving the valve at its current commanded position.  This matches
+        real field practice where positioner recalibration is performed
+        in-service without interrupting flow.
+        """
+        with self._state_lock:
+            self._accumulated_drift = 0.0
+            if self._fault_code == ActuatorFault.CALIBRATION:
+                self._fault_code = ActuatorFault.NONE
 
     def set_pressure_drop(self, pressure_drop_bar: float) -> None:
         """

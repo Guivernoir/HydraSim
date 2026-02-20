@@ -157,12 +157,49 @@ sensors = create_realistic_sensor_suite(reactor_config)
 ### Calibration Example
 
 ```python
+# Single-point (used by MaintenanceManager for remote recal)
+sensor.calibrate(
+    reference_value=7.0,
+    current_time=time.monotonic(),
+    operator_id="modbus_remote",
+    skip_warmup=True,   # sensor already warm — don't restart the warm-up timer
+)
+
+# Two-point pH (higher accuracy, also supports skip_warmup)
 sensor.calibrate_two_point(
     ref_low=4.0, meas_low=4.05,
     ref_high=7.0, meas_high=7.02,
-    timestamp=time.monotonic()
+    timestamp=time.monotonic(),
+    skip_warmup=True,
 )
 ```
+
+## Maintenance Integration
+
+The sensors module is designed to be driven by `wt_simulator.maintenance.MaintenanceManager`. Each sensor exposes a stable API that the manager calls over Modbus.
+
+### Exposed maintenance API per sensor type
+
+| Sensor type | Method | Called by action |
+|---|---|---|
+| All | `calibrate(ref, ts, skip_warmup=...)` | `CALIBRATE` |
+| All | `reset()` | `FULL_RESET` |
+| pH | `clean_electrode("water_rinse", ts)` | `CLEAN_WATER` |
+| pH | `clean_electrode("acid_clean", ts)` | `CLEAN_ACID` |
+| Chlorine (amperometric) | `replace_membrane(ts)` | `REPLACE_MEMBRANE` |
+| Chlorine (DPD) | `replace_reagent(ts)` | `REPLACE_REAGENT` |
+
+### Behaviour after hardware replacement
+
+`replace_membrane()` and `replace_reagent()` do **not** calibrate the sensor to a known value. Instead they:
+- Reset wear counters and potency to factory state
+- Clear `calibration_offset` to zero (no artificial bias)
+- Append a `CalibrationRecord` with `validity_hours=0` so `_check_calibration_valid()` returns `False` immediately
+- Set `status = CALIBRATION_EXPIRED`
+
+The sensor will continue to produce readings (using the cleared offset) but the CALIBRATION_EXPIRED status will be visible to SCADA/HMI until the operator performs a fresh field calibration via the `CALIBRATE` action.
+
+`replace_membrane()` additionally resets `power_on_time`, triggering a warm-up cycle (new PTFE membrane must polarise). `replace_reagent()` sets `skip_warmup=True` in the record since the DPD optics are already at operating temperature.
 
 ## Testing
 
@@ -197,6 +234,6 @@ MIT License
 ## Author
 
 Guilherme F. G. Santos  
-January 28, 2026
+February 20, 2026
 
 ---

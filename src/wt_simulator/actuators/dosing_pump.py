@@ -14,7 +14,6 @@ from .base_actuator import BaseActuator, ActuatorFault, ActuatorStatus
 from enum import Enum, auto
 from typing import Optional
 import math
-import random
 
 
 class PumpType(Enum):
@@ -140,8 +139,11 @@ class DosingPump(BaseActuator):
         self._check_valve_wear = 0.0  # Reduces sealing efficiency
         self._tube_wear = 0.0  # For peristaltic pumps
 
-        # Stroke counter
+        # Stroke counter (lifetime total — never reset)
         self._total_strokes = 0
+        # Per-component wear counters (reset on hardware replacement)
+        self._diaphragm_strokes = 0   # Strokes since last diaphragm replacement
+        self._tube_strokes = 0        # Strokes since last tube replacement
 
     def _validate_setpoint(self, setpoint: float) -> None:
         """
@@ -177,9 +179,13 @@ class DosingPump(BaseActuator):
         if not 0.0 <= flow_rate <= self._max_flow_rate:
             raise ValueError(f"flow_rate must be in [0, {self._max_flow_rate}]")
 
+        # Read _diaphragm_wear under the lock — it is mutated by _update_wear()
+        # which runs inside step() under _state_lock.
+        with self._state_lock:
+            effective_stroke_volume = self._stroke_volume_mL * (1.0 - self._diaphragm_wear)
+
         # Convert flow rate to stroke rate
         # Q (L/min) = stroke_rate (strokes/min) * stroke_volume (mL) / 1000
-        effective_stroke_volume = self._stroke_volume_mL * (1.0 - self._diaphragm_wear)
         if effective_stroke_volume > 0:
             stroke_rate = (flow_rate * 1000.0) / effective_stroke_volume
             stroke_rate = min(stroke_rate, self._max_stroke_rate)
@@ -283,6 +289,8 @@ class DosingPump(BaseActuator):
                 and (self._stroke_phase + phase_increment) >= 0.5
             ):
                 self._total_strokes += 1
+                self._diaphragm_strokes += 1
+                self._tube_strokes += 1
                 self._cycles_count = self._total_strokes
 
         # Update actual position (for base class compatibility)
@@ -303,17 +311,17 @@ class DosingPump(BaseActuator):
         # Base wear from cycles and time
         super()._update_wear()
 
-        # Diaphragm wear (affects all types)
-        stroke_wear = self._total_strokes / 10_000_000.0  # 10M strokes = full wear
+        # Diaphragm wear (based on strokes since last replacement)
+        stroke_wear = self._diaphragm_strokes / 10_000_000.0  # 10M strokes = full wear
         self._diaphragm_wear = min(0.5, stroke_wear)  # Max 50% reduction
 
         # Check valve wear (mainly from strokes)
         self._check_valve_wear = min(0.3, self._total_strokes / 20_000_000.0)
 
-        # Tube wear (peristaltic only)
+        # Tube wear (peristaltic only, based on strokes since last replacement)
         if self._pump_type == PumpType.PERISTALTIC:
             self._tube_wear = min(
-                0.8, self._total_strokes / 5_000_000.0
+                0.8, self._tube_strokes / 5_000_000.0
             )  # Tubes wear faster
 
     def _check_faults(self) -> None:
@@ -339,7 +347,8 @@ class DosingPump(BaseActuator):
 
         # Catastrophic failure (very rare, high wear)
         if self._diaphragm_wear > 0.4 or self._tube_wear > 0.7:
-            if random.random() < 0.001:  # 0.1% chance per check
+            rng = self._get_rng()
+            if rng.random() < 0.001:  # 0.1% chance per check
                 self._fault_code = ActuatorFault.LEAKING
                 self._health_status = ActuatorStatus.FAILED
 
@@ -363,11 +372,13 @@ class DosingPump(BaseActuator):
         """
         Perform diaphragm replacement (maintenance action).
 
-        Resets diaphragm wear and related faults.
+        Resets diaphragm wear and the per-diaphragm stroke counter.
+        The lifetime ``_total_strokes`` counter is preserved so service
+        history is not lost.
         """
         with self._state_lock:
             self._diaphragm_wear = 0.0
-            self._total_strokes = 0
+            self._diaphragm_strokes = 0
             if self._fault_code == ActuatorFault.LEAKING:
                 self._fault_code = ActuatorFault.NONE
                 self._health_status = ActuatorStatus.NORMAL
@@ -387,14 +398,15 @@ class DosingPump(BaseActuator):
         """
         Replace peristaltic tube (maintenance action).
 
-        Only applicable for peristaltic pumps.
+        Only applicable for peristaltic pumps.  Resets tube wear and the
+        per-tube stroke counter; the lifetime ``_total_strokes`` counter
+        is preserved.
         """
-        if self._pump_type != PumpType.PERISTALTIC:
-            raise ValueError("Tube replacement only applicable for peristaltic pumps")
-
         with self._state_lock:
+            if self._pump_type != PumpType.PERISTALTIC:
+                raise ValueError("Tube replacement only applicable for peristaltic pumps")
             self._tube_wear = 0.0
-            self._total_strokes = 0
+            self._tube_strokes = 0
 
     def get_stroke_rate(self) -> float:
         """Get current actual stroke rate."""

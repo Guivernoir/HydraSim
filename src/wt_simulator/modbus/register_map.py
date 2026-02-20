@@ -19,8 +19,31 @@ Register Encoding:
 - Each float occupies 2 consecutive 16-bit registers
 - Byte order: Big-endian (network byte order)
 
+Maintenance register block  (added February 2026)
+-------------------------------------------------
+Holding registers (write to command a maintenance action):
+  HR 200  maintenance_target_id    uint16   MaintenanceTarget enum value
+  HR 201  maintenance_action_code  uint16   MaintenanceAction enum value
+  HR 202  maintenance_param        float32  action parameter (HR 202-203)
+
+Coils (write 1 to trigger; simulator auto-clears after execution):
+  Coil 10  maintenance_trigger     bool
+
+Input registers (written by simulator after each execution):
+  IR 110  maintenance_status_code  uint16   MaintenanceStatus enum value
+  IR 111  maintenance_last_target  uint16   echo of target_id
+  IR 112  maintenance_last_action  uint16   echo of action_code
+
+Workflow:
+  1. Write target_id   → HR 200
+  2. Write action_code → HR 201
+  3. Write param       → HR 202-203 (float32, 0.0 if unused)
+  4. Write True        → Coil 10 (trigger)
+  5. Poll IR 110 until it is not PENDING (5)
+  6. Read IR 110 for status, IR 111/112 for echo
+
 Author: Guilherme F. G. Santos
-Date: January 2026
+Last updated: February 2026
 License: MIT
 """
 
@@ -32,9 +55,9 @@ from enum import IntEnum
 class RegisterType(IntEnum):
     """Modbus register types."""
 
-    COIL = 0  # Discrete output (read/write)
-    DISCRETE_INPUT = 1  # Discrete input (read-only)
-    INPUT_REGISTER = 3  # Analog input (read-only)
+    COIL             = 0  # Discrete output (read/write)
+    DISCRETE_INPUT   = 1  # Discrete input (read-only)
+    INPUT_REGISTER   = 3  # Analog input (read-only)
     HOLDING_REGISTER = 4  # Analog output (read/write)
 
 
@@ -53,13 +76,13 @@ class RegisterDefinition:
         read_only: Whether this register can be written
     """
 
-    address: int
-    name: str
+    address:       int
+    name:          str
     register_type: RegisterType
-    data_type: str
-    units: str
-    description: str
-    read_only: bool = True
+    data_type:     str
+    units:         str
+    description:   str
+    read_only:     bool = True
 
     def validate(self):
         """Validate register definition."""
@@ -103,10 +126,10 @@ class ModbusRegisterMap:
 
     def __init__(self):
         """Initialize register map with standard layout."""
-        self.input_registers: List[RegisterDefinition] = []
+        self.input_registers:   List[RegisterDefinition] = []
         self.holding_registers: List[RegisterDefinition] = []
-        self.coils: List[RegisterDefinition] = []
-        self.discrete_inputs: List[RegisterDefinition] = []
+        self.coils:             List[RegisterDefinition] = []
+        self.discrete_inputs:   List[RegisterDefinition] = []
 
         self._define_input_registers()
         self._define_holding_registers()
@@ -116,6 +139,10 @@ class ModbusRegisterMap:
         # Validate all definitions
         self._validate_all()
 
+    # ------------------------------------------------------------------
+    # Input registers (read-only)
+    # ------------------------------------------------------------------
+
     def _define_input_registers(self):
         """
         Define input registers (read-only sensor values).
@@ -123,125 +150,121 @@ class ModbusRegisterMap:
         Address range: 30000-39999 (Modbus convention)
         Base address: 0 (internal addressing)
         """
-        # pH sensors (3 locations for spatial measurement)
-        self.input_registers.extend(
-            [
-                RegisterDefinition(
-                    address=0,  # 30001-30002 in Modbus addressing
-                    name="pH_inlet",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="float32",
-                    units="pH",
-                    description="pH at inlet (zone 0)",
-                    read_only=True,
-                ),
-                RegisterDefinition(
-                    address=2,  # 30003-30004
-                    name="pH_middle",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="float32",
-                    units="pH",
-                    description="pH at middle (zone n/2)",
-                    read_only=True,
-                ),
-                RegisterDefinition(
-                    address=4,  # 30005-30006
-                    name="pH_outlet",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="float32",
-                    units="pH",
-                    description="pH at outlet (zone -1)",
-                    read_only=True,
-                ),
-            ]
-        )
+        # pH sensors
+        self.input_registers.extend([
+            RegisterDefinition(
+                address=0, name="pH_inlet",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="float32", units="pH",
+                description="pH at inlet (zone 0)", read_only=True,
+            ),
+            RegisterDefinition(
+                address=2, name="pH_middle",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="float32", units="pH",
+                description="pH at middle (zone n/2)", read_only=True,
+            ),
+            RegisterDefinition(
+                address=4, name="pH_outlet",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="float32", units="pH",
+                description="pH at outlet (zone -1)", read_only=True,
+            ),
+        ])
 
-        # Chlorine sensors (2 locations)
-        self.input_registers.extend(
-            [
-                RegisterDefinition(
-                    address=6,  # 30007-30008
-                    name="chlorine_inlet",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="float32",
-                    units="mg/L",
-                    description="Free chlorine at inlet",
-                    read_only=True,
-                ),
-                RegisterDefinition(
-                    address=8,  # 30009-30010
-                    name="chlorine_outlet",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="float32",
-                    units="mg/L",
-                    description="Free chlorine at outlet",
-                    read_only=True,
-                ),
-            ]
-        )
+        # Chlorine sensors
+        self.input_registers.extend([
+            RegisterDefinition(
+                address=6, name="chlorine_inlet",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="float32", units="mg/L",
+                description="Free chlorine at inlet", read_only=True,
+            ),
+            RegisterDefinition(
+                address=8, name="chlorine_outlet",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="float32", units="mg/L",
+                description="Free chlorine at outlet", read_only=True,
+            ),
+        ])
 
         # Flow sensor
-        self.input_registers.extend(
-            [
-                RegisterDefinition(
-                    address=10,  # 30011-30012
-                    name="flow_rate",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="float32",
-                    units="L/min",
-                    description="Main flow rate",
-                    read_only=True,
-                ),
-            ]
-        )
+        self.input_registers.extend([
+            RegisterDefinition(
+                address=10, name="flow_rate",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="float32", units="L/min",
+                description="Main flow rate", read_only=True,
+            ),
+        ])
 
-        # Temperature sensors (2 locations)
-        self.input_registers.extend(
-            [
-                RegisterDefinition(
-                    address=12,  # 30013-30014
-                    name="temperature_inlet",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="float32",
-                    units="°C",
-                    description="Water temperature at inlet",
-                    read_only=True,
-                ),
-                RegisterDefinition(
-                    address=14,  # 30015-30016
-                    name="temperature_outlet",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="float32",
-                    units="°C",
-                    description="Water temperature at outlet",
-                    read_only=True,
-                ),
-            ]
-        )
+        # Temperature sensors
+        self.input_registers.extend([
+            RegisterDefinition(
+                address=12, name="temperature_inlet",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="float32", units="°C",
+                description="Water temperature at inlet", read_only=True,
+            ),
+            RegisterDefinition(
+                address=14, name="temperature_outlet",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="float32", units="°C",
+                description="Water temperature at outlet", read_only=True,
+            ),
+        ])
 
         # System status
-        self.input_registers.extend(
-            [
-                RegisterDefinition(
-                    address=100,  # 30101-30102
-                    name="simulation_time",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="float32",
-                    units="s",
-                    description="Simulation elapsed time",
-                    read_only=True,
+        self.input_registers.extend([
+            RegisterDefinition(
+                address=100, name="simulation_time",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="float32", units="s",
+                description="Simulation elapsed time", read_only=True,
+            ),
+            RegisterDefinition(
+                address=102, name="system_status",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="uint16", units="",
+                description="System status code (0=OK, >0=fault)", read_only=True,
+            ),
+        ])
+
+        # ----------------------------------------------------------------
+        # Maintenance feedback registers (read by external client to check
+        # result after setting the trigger coil)
+        # ----------------------------------------------------------------
+        self.input_registers.extend([
+            RegisterDefinition(
+                address=110, name="maintenance_status_code",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="uint16", units="",
+                description=(
+                    "Last maintenance result code "
+                    "(0=SUCCESS 1=INVALID_TARGET 2=INVALID_ACTION "
+                    "3=NOT_SUPPORTED 4=EXEC_ERROR 5=PENDING)"
                 ),
-                RegisterDefinition(
-                    address=102,  # 30103
-                    name="system_status",
-                    register_type=RegisterType.INPUT_REGISTER,
-                    data_type="uint16",
-                    units="",
-                    description="System status code (0=OK, >0=fault)",
-                    read_only=True,
-                ),
-            ]
-        )
+                read_only=True,
+            ),
+            RegisterDefinition(
+                address=111, name="maintenance_last_target",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="uint16", units="",
+                description="Target ID echoed after last maintenance op",
+                read_only=True,
+            ),
+            RegisterDefinition(
+                address=112, name="maintenance_last_action",
+                register_type=RegisterType.INPUT_REGISTER,
+                data_type="uint16", units="",
+                description="Action code echoed after last maintenance op",
+                read_only=True,
+            ),
+        ])
+
+    # ------------------------------------------------------------------
+    # Holding registers (read/write)
+    # ------------------------------------------------------------------
 
     def _define_holding_registers(self):
         """
@@ -250,190 +273,198 @@ class ModbusRegisterMap:
         Address range: 40000-49999 (Modbus convention)
         Base address: 0 (internal addressing)
         """
-        # Actuator setpoints
-        self.holding_registers.extend(
-            [
-                RegisterDefinition(
-                    address=0,  # 40001-40002
-                    name="acid_flow_rate",
-                    register_type=RegisterType.HOLDING_REGISTER,
-                    data_type="float32",
-                    units="L/min",
-                    description="Acid dosing pump flow rate setpoint",
-                    read_only=False,
-                ),
-                RegisterDefinition(
-                    address=2,  # 40003-40004
-                    name="chlorine_flow_rate",
-                    register_type=RegisterType.HOLDING_REGISTER,
-                    data_type="float32",
-                    units="L/min",
-                    description="Chlorine dosing pump flow rate setpoint",
-                    read_only=False,
-                ),
-                RegisterDefinition(
-                    address=4,  # 40005-40006
-                    name="inlet_flow_rate",
-                    register_type=RegisterType.HOLDING_REGISTER,
-                    data_type="float32",
-                    units="L/min",
-                    description="Main inlet flow rate setpoint",
-                    read_only=False,
-                ),
-            ]
-        )
+        # Process actuator setpoints
+        self.holding_registers.extend([
+            RegisterDefinition(
+                address=0, name="acid_flow_rate",
+                register_type=RegisterType.HOLDING_REGISTER,
+                data_type="float32", units="L/min",
+                description="Acid dosing pump flow rate setpoint",
+                read_only=False,
+            ),
+            RegisterDefinition(
+                address=2, name="chlorine_flow_rate",
+                register_type=RegisterType.HOLDING_REGISTER,
+                data_type="float32", units="L/min",
+                description="Chlorine dosing pump flow rate setpoint",
+                read_only=False,
+            ),
+            RegisterDefinition(
+                address=4, name="inlet_flow_rate",
+                register_type=RegisterType.HOLDING_REGISTER,
+                data_type="float32", units="L/min",
+                description="Main inlet flow rate setpoint",
+                read_only=False,
+            ),
+        ])
 
-        # Dosing concentrations (normally constant, but writable for config)
-        self.holding_registers.extend(
-            [
-                RegisterDefinition(
-                    address=10,  # 40011-40012
-                    name="acid_concentration",
-                    register_type=RegisterType.HOLDING_REGISTER,
-                    data_type="float32",
-                    units="mol/L",
-                    description="Acid stock solution concentration",
-                    read_only=False,
-                ),
-                RegisterDefinition(
-                    address=12,  # 40013-40014
-                    name="chlorine_concentration",
-                    register_type=RegisterType.HOLDING_REGISTER,
-                    data_type="float32",
-                    units="mg/L",
-                    description="Chlorine stock solution concentration",
-                    read_only=False,
-                ),
-            ]
-        )
+        # Dosing concentrations
+        self.holding_registers.extend([
+            RegisterDefinition(
+                address=10, name="acid_concentration",
+                register_type=RegisterType.HOLDING_REGISTER,
+                data_type="float32", units="mol/L",
+                description="Acid stock solution concentration",
+                read_only=False,
+            ),
+            RegisterDefinition(
+                address=12, name="chlorine_concentration",
+                register_type=RegisterType.HOLDING_REGISTER,
+                data_type="float32", units="mg/L",
+                description="Chlorine stock solution concentration",
+                read_only=False,
+            ),
+        ])
 
         # Simulation control
-        self.holding_registers.extend(
-            [
-                RegisterDefinition(
-                    address=100,  # 40101-40102
-                    name="simulation_timestep",
-                    register_type=RegisterType.HOLDING_REGISTER,
-                    data_type="float32",
-                    units="s",
-                    description="Simulation time step",
-                    read_only=False,
+        self.holding_registers.extend([
+            RegisterDefinition(
+                address=100, name="simulation_timestep",
+                register_type=RegisterType.HOLDING_REGISTER,
+                data_type="float32", units="s",
+                description="Simulation time step",
+                read_only=False,
+            ),
+        ])
+
+        # ----------------------------------------------------------------
+        # Maintenance command registers
+        # Write target, action, param → then pulse Coil 10 to execute.
+        # ----------------------------------------------------------------
+        self.holding_registers.extend([
+            RegisterDefinition(
+                address=200, name="maintenance_target_id",
+                register_type=RegisterType.HOLDING_REGISTER,
+                data_type="uint16", units="",
+                description=(
+                    "Target device ID for maintenance action "
+                    "(0=pH_inlet … 10=inlet_valve; see MaintenanceTarget enum)"
                 ),
-            ]
-        )
+                read_only=False,
+            ),
+            RegisterDefinition(
+                address=201, name="maintenance_action_code",
+                register_type=RegisterType.HOLDING_REGISTER,
+                data_type="uint16", units="",
+                description=(
+                    "Action code (0=CALIBRATE … 11=REPLACE_TUBE; "
+                    "see MaintenanceAction enum)"
+                ),
+                read_only=False,
+            ),
+            RegisterDefinition(
+                address=202, name="maintenance_param",
+                register_type=RegisterType.HOLDING_REGISTER,
+                data_type="float32", units="",
+                description=(
+                    "Action parameter (float32, HR 202-203). "
+                    "For CALIBRATE: reference value (add 1000 to skip warmup). "
+                    "Unused actions: write 0.0"
+                ),
+                read_only=False,
+            ),
+        ])
+
+    # ------------------------------------------------------------------
+    # Coils (read/write discrete)
+    # ------------------------------------------------------------------
 
     def _define_coils(self):
-        """
-        Define coils (read/write discrete outputs).
+        self.coils.extend([
+            RegisterDefinition(
+                address=0, name="acid_pump_enable",
+                register_type=RegisterType.COIL,
+                data_type="bool", units="",
+                description="Enable acid dosing pump (True=ON, False=OFF)",
+                read_only=False,
+            ),
+            RegisterDefinition(
+                address=1, name="chlorine_pump_enable",
+                register_type=RegisterType.COIL,
+                data_type="bool", units="",
+                description="Enable chlorine dosing pump (True=ON, False=OFF)",
+                read_only=False,
+            ),
+            RegisterDefinition(
+                address=2, name="simulation_running",
+                register_type=RegisterType.COIL,
+                data_type="bool", units="",
+                description="Simulation running (True=running, False=paused)",
+                read_only=False,
+            ),
+            # ----------------------------------------------------------------
+            # Maintenance trigger coil — write True to fire the action whose
+            # parameters are in HR 200-203.  The simulator auto-clears this
+            # coil once the action has completed (success or error).
+            # ----------------------------------------------------------------
+            RegisterDefinition(
+                address=10, name="maintenance_trigger",
+                register_type=RegisterType.COIL,
+                data_type="bool", units="",
+                description=(
+                    "Write True to execute maintenance action defined in "
+                    "HR 200-203. Simulator auto-clears to False after execution."
+                ),
+                read_only=False,
+            ),
+        ])
 
-        Address range: 00000-09999 (Modbus convention)
-        Base address: 0 (internal addressing)
-        """
-        self.coils.extend(
-            [
-                RegisterDefinition(
-                    address=0,  # 00001
-                    name="acid_pump_enable",
-                    register_type=RegisterType.COIL,
-                    data_type="bool",
-                    units="",
-                    description="Enable acid dosing pump (True=ON, False=OFF)",
-                    read_only=False,
-                ),
-                RegisterDefinition(
-                    address=1,  # 00002
-                    name="chlorine_pump_enable",
-                    register_type=RegisterType.COIL,
-                    data_type="bool",
-                    units="",
-                    description="Enable chlorine dosing pump (True=ON, False=OFF)",
-                    read_only=False,
-                ),
-                RegisterDefinition(
-                    address=2,  # 00003
-                    name="simulation_running",
-                    register_type=RegisterType.COIL,
-                    data_type="bool",
-                    units="",
-                    description="Simulation running (True=running, False=paused)",
-                    read_only=False,
-                ),
-            ]
-        )
+    # ------------------------------------------------------------------
+    # Discrete inputs (read-only)
+    # ------------------------------------------------------------------
 
     def _define_discrete_inputs(self):
-        """
-        Define discrete inputs (read-only discrete values).
+        self.discrete_inputs.extend([
+            RegisterDefinition(
+                address=0, name="sensor_fault_pH_inlet",
+                register_type=RegisterType.DISCRETE_INPUT,
+                data_type="bool", units="",
+                description="pH inlet sensor fault status", read_only=True,
+            ),
+            RegisterDefinition(
+                address=1, name="sensor_fault_pH_outlet",
+                register_type=RegisterType.DISCRETE_INPUT,
+                data_type="bool", units="",
+                description="pH outlet sensor fault status", read_only=True,
+            ),
+            RegisterDefinition(
+                address=2, name="sensor_fault_chlorine",
+                register_type=RegisterType.DISCRETE_INPUT,
+                data_type="bool", units="",
+                description="Chlorine sensor fault status", read_only=True,
+            ),
+        ])
 
-        Address range: 10000-19999 (Modbus convention)
-        Base address: 0 (internal addressing)
-        """
-        self.discrete_inputs.extend(
-            [
-                RegisterDefinition(
-                    address=0,  # 10001
-                    name="sensor_fault_pH_inlet",
-                    register_type=RegisterType.DISCRETE_INPUT,
-                    data_type="bool",
-                    units="",
-                    description="pH inlet sensor fault status",
-                    read_only=True,
-                ),
-                RegisterDefinition(
-                    address=1,  # 10002
-                    name="sensor_fault_pH_outlet",
-                    register_type=RegisterType.DISCRETE_INPUT,
-                    data_type="bool",
-                    units="",
-                    description="pH outlet sensor fault status",
-                    read_only=True,
-                ),
-                RegisterDefinition(
-                    address=2,  # 10003
-                    name="sensor_fault_chlorine",
-                    register_type=RegisterType.DISCRETE_INPUT,
-                    data_type="bool",
-                    units="",
-                    description="Chlorine sensor fault status",
-                    read_only=True,
-                ),
-            ]
-        )
+    # ------------------------------------------------------------------
+    # Validation helpers
+    # ------------------------------------------------------------------
 
     def _validate_all(self):
-        """Validate all register definitions and check for conflicts."""
-        # Validate each register
         all_registers = (
             self.input_registers
             + self.holding_registers
             + self.coils
             + self.discrete_inputs
         )
-
         for reg in all_registers:
             reg.validate()
 
-        # Check for address conflicts within each type
-        self._check_address_conflicts(self.input_registers, "Input registers")
+        self._check_address_conflicts(self.input_registers,   "Input registers")
         self._check_address_conflicts(self.holding_registers, "Holding registers")
-        self._check_address_conflicts(self.coils, "Coils")
-        self._check_address_conflicts(self.discrete_inputs, "Discrete inputs")
+        self._check_address_conflicts(self.coils,             "Coils")
+        self._check_address_conflicts(self.discrete_inputs,   "Discrete inputs")
 
     def _check_address_conflicts(
         self, registers: List[RegisterDefinition], type_name: str
     ):
-        """Check for overlapping register addresses."""
         address_ranges = []
-
         for reg in registers:
             start = reg.address
-            end = reg.address + reg.size_words - 1
+            end   = reg.address + reg.size_words - 1
             address_ranges.append((start, end, reg.name))
 
-        # Sort by start address
         address_ranges.sort(key=lambda x: x[0])
 
-        # Check for overlaps
         for i in range(len(address_ranges) - 1):
             curr_start, curr_end, curr_name = address_ranges[i]
             next_start, next_end, next_name = address_ranges[i + 1]
@@ -445,42 +476,25 @@ class ModbusRegisterMap:
                     f"[{next_start}-{next_end}]"
                 )
 
+    # ------------------------------------------------------------------
+    # Lookup helpers
+    # ------------------------------------------------------------------
+
     def get_register_by_name(self, name: str) -> Optional[RegisterDefinition]:
-        """
-        Find register definition by name.
-
-        Args:
-            name: Register name
-
-        Returns:
-            RegisterDefinition if found, None otherwise
-        """
         all_registers = (
             self.input_registers
             + self.holding_registers
             + self.coils
             + self.discrete_inputs
         )
-
         for reg in all_registers:
             if reg.name == name:
                 return reg
-
         return None
 
     def get_register_by_address(
         self, address: int, register_type: RegisterType
     ) -> Optional[RegisterDefinition]:
-        """
-        Find register definition by address and type.
-
-        Args:
-            address: Register address
-            register_type: Type of register
-
-        Returns:
-            RegisterDefinition if found, None otherwise
-        """
         if register_type == RegisterType.INPUT_REGISTER:
             registers = self.input_registers
         elif register_type == RegisterType.HOLDING_REGISTER:
@@ -495,7 +509,6 @@ class ModbusRegisterMap:
         for reg in registers:
             if reg.address <= address < reg.address + reg.size_words:
                 return reg
-
         return None
 
     def print_register_map(self):
@@ -504,74 +517,41 @@ class ModbusRegisterMap:
         print("MODBUS REGISTER MAP")
         print("=" * 80)
 
-        print("\nINPUT REGISTERS (Read-Only Sensor Values)")
+        print("\nINPUT REGISTERS (Read-Only)")
         print("-" * 80)
-        print(
-            f"{'Address':<10} {'Name':<25} {'Type':<10} {'Units':<10} {'Description':<30}"
-        )
+        print(f"{'Address':<12} {'Name':<30} {'Type':<10} {'Units':<10} {'Description'}")
         print("-" * 80)
         for reg in self.input_registers:
-            modbus_addr = 30001 + reg.address
-            if reg.data_type == "float32":
-                addr_str = f"{modbus_addr}-{modbus_addr+1}"
-            else:
-                addr_str = str(modbus_addr)
-            print(
-                f"{addr_str:<10} {reg.name:<25} {reg.data_type:<10} {reg.units:<10} {reg.description:<30}"
-            )
+            base = 30001 + reg.address
+            addr = f"{base}-{base+1}" if reg.data_type == "float32" else str(base)
+            print(f"{addr:<12} {reg.name:<30} {reg.data_type:<10} {reg.units:<10} {reg.description}")
 
-        print("\nHOLDING REGISTERS (Read/Write Actuator Setpoints)")
+        print("\nHOLDING REGISTERS (Read/Write)")
         print("-" * 80)
-        print(
-            f"{'Address':<10} {'Name':<25} {'Type':<10} {'Units':<10} {'Description':<30}"
-        )
+        print(f"{'Address':<12} {'Name':<30} {'Type':<10} {'Units':<10} {'Description'}")
         print("-" * 80)
         for reg in self.holding_registers:
-            modbus_addr = 40001 + reg.address
-            if reg.data_type == "float32":
-                addr_str = f"{modbus_addr}-{modbus_addr+1}"
-            else:
-                addr_str = str(modbus_addr)
-            print(
-                f"{addr_str:<10} {reg.name:<25} {reg.data_type:<10} {reg.units:<10} {reg.description:<30}"
-            )
+            base = 40001 + reg.address
+            addr = f"{base}-{base+1}" if reg.data_type == "float32" else str(base)
+            print(f"{addr:<12} {reg.name:<30} {reg.data_type:<10} {reg.units:<10} {reg.description}")
 
-        print("\nCOILS (Read/Write Discrete Outputs)")
+        print("\nCOILS (Read/Write)")
         print("-" * 80)
-        print(f"{'Address':<10} {'Name':<25} {'Description':<50}")
+        print(f"{'Address':<12} {'Name':<30} {'Description'}")
         print("-" * 80)
         for reg in self.coils:
-            modbus_addr = 1 + reg.address
-            print(f"{modbus_addr:<10} {reg.name:<25} {reg.description:<50}")
+            print(f"{1+reg.address:<12} {reg.name:<30} {reg.description}")
 
-        print("\nDISCRETE INPUTS (Read-Only Status Bits)")
+        print("\nDISCRETE INPUTS (Read-Only)")
         print("-" * 80)
-        print(f"{'Address':<10} {'Name':<25} {'Description':<50}")
+        print(f"{'Address':<12} {'Name':<30} {'Description'}")
         print("-" * 80)
         for reg in self.discrete_inputs:
-            modbus_addr = 10001 + reg.address
-            print(f"{modbus_addr:<10} {reg.name:<25} {reg.description:<50}")
+            print(f"{10001+reg.address:<12} {reg.name:<30} {reg.description}")
 
         print("\n" + "=" * 80)
 
 
 if __name__ == "__main__":
-    """Test register map."""
     reg_map = ModbusRegisterMap()
     reg_map.print_register_map()
-
-    # Test lookups
-    print("\nTest Lookups:")
-    print("-" * 80)
-
-    reg = reg_map.get_register_by_name("pH_inlet")
-    if reg:
-        print(
-            f"Found register: {reg.name} at address {reg.address} ({reg.description})"
-        )
-
-    reg = reg_map.get_register_by_address(0, RegisterType.INPUT_REGISTER)
-    if reg:
-        print(f"Register at IR:0 is {reg.name}")
-
-    print("\n✓ Register map validation passed")
