@@ -11,6 +11,7 @@ import signal
 import sys
 from typing import Dict, Tuple, Optional, Any
 from contextlib import suppress
+from pathlib import Path
 
 # Physics engine
 from .core import IntegratedCSTR, ReactorConfiguration, BoundaryConditions, ReactorState
@@ -324,7 +325,9 @@ def initialize_actuators(boundary: BoundaryConditions) -> Dict[str, Any]:
     )
 
     # Prime actuators to initial operating point so simulation starts near steady state.
-    actuators["acid_valve"].set_flow_rate(validate_flow_rate(boundary.acid_flow_rate, 2.0))
+    actuators["acid_valve"].set_flow_rate(
+        validate_flow_rate(boundary.acid_flow_rate, 2.0)
+    )
     actuators["chlorine_pump"].set_flow_rate(
         validate_flow_rate(boundary.chlorine_flow_rate, 1.0)
     )
@@ -419,6 +422,27 @@ def main():
         action="store_true",
         help="Run without Modbus server (testing mode)",
     )
+    parser.add_argument(
+        "--scenario",
+        help="Optional built-in scenario ID or alias to replay against this simulator",
+    )
+    parser.add_argument(
+        "--scenario-custom-json",
+        type=Path,
+        help="Optional custom scenario JSON file for replay",
+    )
+    parser.add_argument(
+        "--scenario-time-scale",
+        type=float,
+        default=1.0,
+        help="Scenario replay timing scale; 0 runs immediately",
+    )
+    parser.add_argument(
+        "--scenario-delay",
+        type=float,
+        default=1.0,
+        help="Seconds to wait after Modbus startup before scenario replay",
+    )
     args = parser.parse_args()
 
     logger.info("=" * 70)
@@ -509,10 +533,26 @@ def main():
 
         try:
             maintenance_manager = MaintenanceManager(sensors, actuators)
-            slave = ModbusSlave(reg_map, modbus_config, maintenance_manager=maintenance_manager)
+            slave = ModbusSlave(
+                reg_map, modbus_config, maintenance_manager=maintenance_manager
+            )
             slave.start(blocking=False)
             initialize_modbus_defaults(slave, boundary)
             logger.info(f"Modbus server started on {args.host}:{args.port}")
+            if args.scenario or args.scenario_custom_json:
+                from .scenarios.live import start_live_scenario_thread
+
+                start_live_scenario_thread(
+                    args.scenario or "custom",
+                    args.host,
+                    args.port,
+                    unit_id=1,
+                    time_scale=args.scenario_time_scale,
+                    startup_delay_s=args.scenario_delay,
+                    custom_json=args.scenario_custom_json,
+                    logger=logger,
+                )
+                logger.info("Scenario replay scheduled")
 
         except RuntimeError as e:
             logger.error(f"Modbus server startup failed: {e}")
@@ -525,6 +565,8 @@ def main():
             slave = None
     else:
         logger.info("\n[PHASE 5] Skipping Modbus (--no-modbus)")
+        if args.scenario or args.scenario_custom_json:
+            logger.warning("Scenario replay skipped because Modbus is disabled")
 
     # ========================================================================
     # PHASE 6: Main Simulation Loop

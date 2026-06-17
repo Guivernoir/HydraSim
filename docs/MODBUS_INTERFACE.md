@@ -14,6 +14,11 @@ Feedback to controller:
 
 The Modbus server does not generate autonomous control actions. It receives commands and publishes process feedback.
 
+For deterministic traffic generation, see `docs/SCENARIO_RUNTIME.md` and
+`docs/MVP_MODBUS_SCENARIOS.md`. The Modbus server remains the field/process
+endpoint. The scenario command-center runner is a separate local client role
+that can drive this endpoint for repeatable tests.
+
 ## Runtime Mapping
 
 Each simulation cycle:

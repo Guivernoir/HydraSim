@@ -37,6 +37,10 @@ dev = [
 
 [project.scripts]
 wts-sim = "wt_simulator.__main__:main"
+wts-mvp-modbus-scenario = "wt_simulator.scenarios.mvp_modbus:main"
+wts-run-scenario = "wt_simulator.scenarios.run:main"
+wts-validate-scenario = "wt_simulator.scenarios.validate:main"
+wts-export-lab-bundle = "wt_simulator.scenarios.bundle:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

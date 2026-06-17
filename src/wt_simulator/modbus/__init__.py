@@ -73,8 +73,6 @@ from .register_map import ModbusRegisterMap, RegisterDefinition, RegisterType
 
 from .protocols import ModbusEncoder, ModbusDecoder
 
-from .slave import ModbusSlave, ModbusServerConfig
-
 __all__ = [
     # Register mapping
     "ModbusRegisterMap",
@@ -87,6 +85,16 @@ __all__ = [
     "ModbusSlave",
     "ModbusServerConfig",
 ]
+
+
+def __getattr__(name):
+    if name in {"ModbusSlave", "ModbusServerConfig"}:
+        from .slave import ModbusServerConfig, ModbusSlave
+
+        return {"ModbusSlave": ModbusSlave, "ModbusServerConfig": ModbusServerConfig}[
+            name
+        ]
+    raise AttributeError(name)
 
 
 def print_package_info():

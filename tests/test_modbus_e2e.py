@@ -1,6 +1,7 @@
 import socket
 import sys
 import time
+import importlib.util
 from pathlib import Path
 import unittest
 
@@ -8,6 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+
+if importlib.util.find_spec("pymodbus") is None:
+    raise unittest.SkipTest("pymodbus optional dependency is not installed")
 
 from pymodbus.client import ModbusTcpClient
 
@@ -105,7 +109,9 @@ class ModbusPlantHarness:
         high, low = ModbusEncoder.float32_to_registers(value)
         response = self.client.write_registers(address, [high, low], device_id=1)
         if response.isError():
-            raise AssertionError(f"Write holding register failed at {address}: {response}")
+            raise AssertionError(
+                f"Write holding register failed at {address}: {response}"
+            )
 
     def _write_coil(self, address: int, value: bool):
         response = self.client.write_coil(address, value, device_id=1)
@@ -116,7 +122,9 @@ class ModbusPlantHarness:
         response = self.client.read_input_registers(address, count=2, device_id=1)
         if response.isError():
             raise AssertionError(f"Read input register failed at {address}: {response}")
-        return ModbusDecoder.registers_to_float32(response.registers[0], response.registers[1])
+        return ModbusDecoder.registers_to_float32(
+            response.registers[0], response.registers[1]
+        )
 
     def step(self, dt: float = 1.0):
         commands = read_modbus_commands(self.slave)

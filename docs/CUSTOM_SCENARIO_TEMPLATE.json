@@ -1,0 +1,41 @@
+{
+  "scenario_id": "CUSTOM-001",
+  "name": "Custom read-only check",
+  "purpose": "Exercise a custom client against HydraSim.",
+  "nodes": [
+    {
+      "node_id": "client",
+      "label": "Custom client",
+      "mac": "02:00:00:00:40:10",
+      "ipv4": "203.0.113.10",
+      "role": "client"
+    },
+    {
+      "node_id": "hydra",
+      "label": "HydraSim endpoint",
+      "mac": "02:00:00:00:40:20",
+      "ipv4": "203.0.113.20",
+      "role": "Modbus TCP process endpoint",
+      "modbus_port": 502
+    }
+  ],
+  "field_points": [],
+  "transactions": [
+    {
+      "ordinal": 1,
+      "timestamp_ms": 0,
+      "actor_id": "client",
+      "server_id": "hydra",
+      "function_code": 4,
+      "operation": "read_input_registers",
+      "address": 0,
+      "quantity": 2,
+      "value_summary": "",
+      "response": "ok",
+      "scenario_label": "custom_read",
+      "review_hint": "",
+      "wire_values": []
+    }
+  ],
+  "limitations": ["custom synthetic scenario"]
+}
