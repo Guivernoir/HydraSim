@@ -46,6 +46,7 @@ This simulator is intended for controls integration, operator training, and soft
 - Unit-process contracts for intake channel, rapid-mix/dosing, flocculation placeholder, clarifier, filter/backwash, contact basin, clearwell, pumping header, chemical feed skid, and waste/backwash handling
 - Boundary-condition contracts for inlets, outlets, pumps, valves, dosing injection, mixers, baffles, filter media, backwash, drains, recirculation, and free-surface level metadata
 - Early CFD performance presets and benchmark evidence for tiny, small, and medium local grids
+- Runtime Performance Gate records with `synthetic_runtime_performance_gate` evidence for bounded local CFD presets
 - Device-to-CFD coupling contracts where simulated sensors sample spatial mesh regions and simulated actuators apply bounded scalar/source effects
 - Controller-to-CFD coupling contracts where synthetic controller actions produce bounded source effects through declared actuator regions
 - Supervisory digital-twin records for synthetic HMI, historian, and engineering-workstation consumers of CFD summaries and metadata
@@ -54,6 +55,11 @@ This simulator is intended for controls integration, operator training, and soft
 - Calibration evidence fits with `fitted_not_validated` status, accepted ranges, residuals, preserved rejected data, and explicit calibration records
 - Numerical verification suite results for constant-scalar conservation, flow residual, mesh refinement, boundary response, and long-run drift checks
 - Scenario-level CFD process evolution truth for built-in reference plant scenarios and bundle exports
+- Scenario process-truth review records linking process evolution, network effects, operator/historian effects, review questions, and prohibited claims
+- CFD Lab Bundle v2 compact mesh, geometry, state timeline, sampled scalar-field, and sampled flow-snapshot artifacts
+- Digital-twin validation gate records with `synthetic_digital_twin_validation_gate` evidence and explicit real-plant validation blocking status
+- External review and calibration evidence gate records with `synthetic_external_review_calibration_gate` evidence and `pending_external_review` default status
+- Reference Water Plant CFD release-candidate records with `synthetic_reference_water_plant_cfd_release_candidate` evidence
 - Digital-twin metadata records for geometry, equipment context, calibration status, uncertainty, and validation status
 - Deterministic CFD summary export for lab-bundle and regression use
 
@@ -78,6 +84,12 @@ This simulator is intended for controls integration, operator training, and soft
 - Calibration fitting is not validation; `evidence_calibrated` requires an explicit calibration record and still remains separate from real-plant validation.
 - Numerical verification suite results are bounded synthetic implementation checks, not external CFD conformance or real-plant validation.
 - Scenario-level CFD process evolution is `synthetic_cfd_process_truth`, not real-plant validation, commissioning evidence, or safety evidence.
+- Scenario process-truth review is `synthetic_scenario_process_review`, not real-plant validation, attack/failure proof, certification, safety evidence, or calibrated plant equivalence.
+- CFD Lab Bundle v2 evidence is `synthetic_cfd_lab_bundle_v2`; it uses compact sampled process-state artifacts and is not a full-array CFD archive, real-plant validation, commissioning evidence, certification, or safety evidence.
+- Runtime performance gate evidence is `synthetic_runtime_performance_gate`, not hardware qualification, appliance sizing, field performance evidence, or a guarantee for arbitrary whole-plant grid sizes.
+- Digital-twin validation gate evidence is `synthetic_digital_twin_validation_gate`; its current real-plant validation status is `blocked_missing_real_calibration_and_external_validation`, so it is implementation evidence only.
+- External review and calibration evidence gate records are `synthetic_external_review_calibration_gate`; they can record review/comparison/calibration inputs, but the default disposition is `pending_external_review` and recorded evidence does not automatically validate a real plant.
+- Reference Water Plant CFD release-candidate evidence is `synthetic_reference_water_plant_cfd_release_candidate`; it proves current package surfaces are wired together, not field readiness, plant validation, hardware qualification, or safety behavior.
 - CFD grids are bounded for developer-workstation simulation and lab traffic generation, not high-fidelity hydraulic design.
 - Device-to-CFD coupling uses `simulated_metadata` until calibrated device placement, sample-line behavior, and actuator effects have separate evidence.
 - Controller-to-CFD coupling is synthetic setpoint/error behavior; it is not real PLC firmware, certified control, or safety-interlock validation.

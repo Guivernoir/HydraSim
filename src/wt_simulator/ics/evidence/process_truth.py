@@ -15,7 +15,7 @@ from wt_simulator.hydraulics.cfd import (
     step_scalar_transport,
 )
 
-from .models import CfdProcessEvolution, IcsScenario, IcsTransaction
+from ..models import CfdProcessEvolution, IcsScenario, IcsTransaction
 
 
 def _limitations() -> tuple[str, ...]:

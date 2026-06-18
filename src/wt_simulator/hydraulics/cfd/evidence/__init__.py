@@ -1,0 +1,1 @@
+"""CFD evidence-gate helpers."""

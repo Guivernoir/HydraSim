@@ -118,6 +118,40 @@ class CfdProcessEvolution:
 
 
 @dataclass(frozen=True)
+class ScenarioProcessReview:
+    scenario_id: str
+    area: str
+    process_truth: str
+    observable_network_effects: str
+    operator_historian_effects: str
+    review_questions: Sequence[str]
+    must_not_claim: Sequence[str]
+    evidence_status: str
+
+    def validate(self) -> None:
+        if not self.scenario_id:
+            raise ValueError("scenario review scenario_id is required")
+        if not self.area:
+            raise ValueError("scenario review area is required")
+        if not self.process_truth:
+            raise ValueError("scenario review process truth is required")
+        if not self.observable_network_effects:
+            raise ValueError("scenario review network effects are required")
+        if not self.operator_historian_effects:
+            raise ValueError("scenario review operator/historian effects are required")
+        if not self.review_questions:
+            raise ValueError("scenario review questions are required")
+        if not self.must_not_claim:
+            raise ValueError("scenario review must-not-claim text is required")
+        if self.evidence_status != "synthetic_scenario_process_review":
+            raise ValueError("unsupported scenario review evidence status")
+        blocked = " ".join(self.must_not_claim).lower()
+        for phrase in ("real plant", "certification", "safety"):
+            if phrase not in blocked:
+                raise ValueError(f"scenario review must block {phrase!r} claims")
+
+
+@dataclass(frozen=True)
 class RuntimeArtifact:
     profile: PlantProfile
     scenario: IcsScenario
@@ -128,4 +162,5 @@ class RuntimeArtifact:
     transactions: Sequence[IcsTransaction]
     controller_states: Sequence[ControllerState]
     process_evolution: Sequence[CfdProcessEvolution]
+    process_reviews: Sequence[ScenarioProcessReview]
     limitations: Sequence[str]

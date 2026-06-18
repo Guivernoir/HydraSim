@@ -6,8 +6,8 @@ from dataclasses import replace
 
 from .catalog import AREA_CHOICES, STAGE_NODE_FILTERS, STAGE_TRANSACTION_FILTERS, STAGES
 from .control import evaluate_controller_states
+from .evidence import build_process_evolution, build_process_reviews
 from .models import RuntimeArtifact
-from .process_truth import build_process_evolution
 from .profiles import get_profile
 from .scenarios import get_scenario
 
@@ -68,6 +68,11 @@ def build_runtime_artifact(
     active_units = tuple(unit for unit in profile.units if unit.area in selected_areas)
     controller_states = evaluate_controller_states(active_nodes, transactions)
     process_evolution = build_process_evolution(scenario, transactions)
+    process_reviews = build_process_reviews(
+        process_evolution,
+        transactions,
+        controller_states,
+    )
     limitations = profile.limitations + scenario.limitations
     return RuntimeArtifact(
         profile,
@@ -79,5 +84,6 @@ def build_runtime_artifact(
         transactions,
         controller_states,
         process_evolution,
+        process_reviews,
         limitations,
     )

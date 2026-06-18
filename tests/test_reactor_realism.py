@@ -26,7 +26,9 @@ class TestReactorRealism(unittest.TestCase):
             n_zones=5,
         )
         reactor = IntegratedCSTR(cfg)
-        boundary = BoundaryConditions(inlet_flow_rate=0.0, acid_flow_rate=0.0, chlorine_flow_rate=0.0)
+        boundary = BoundaryConditions(
+            inlet_flow_rate=0.0, acid_flow_rate=0.0, chlorine_flow_rate=0.0
+        )
 
         cl0 = float(reactor.state.chlorine[0])
         nh30 = float(reactor.state.ammonia[0])
@@ -54,7 +56,9 @@ class TestReactorRealism(unittest.TestCase):
             n_zones=5,
         )
         reactor = IntegratedCSTR(cfg)
-        boundary = BoundaryConditions(inlet_flow_rate=0.0, acid_flow_rate=0.0, chlorine_flow_rate=0.0)
+        boundary = BoundaryConditions(
+            inlet_flow_rate=0.0, acid_flow_rate=0.0, chlorine_flow_rate=0.0
+        )
 
         cl0 = float(reactor.state.chlorine[0])
         demand0 = float(reactor.state.chlorine_demand[0])
@@ -186,7 +190,9 @@ class TestReactorRealism(unittest.TestCase):
 
         self.assertGreater(float(reactor.state.chlorine[2]), 0.2)
         self.assertGreater(float(reactor.state.chlorine[-1]), 0.05)
-        self.assertGreater(float(reactor.state.chlorine[0]), float(reactor.state.chlorine[-1]))
+        self.assertGreater(
+            float(reactor.state.chlorine[0]), float(reactor.state.chlorine[-1])
+        )
 
 
 if __name__ == "__main__":

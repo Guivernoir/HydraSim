@@ -52,12 +52,12 @@ unsafe network tool.
 | HS-30A | Numerical Verification Suite | Manufactured/simple reference cases, conservation checks, mesh-refinement sensitivity, boundary-condition tests, and long-run drift checks. | Implemented foundation |
 | HS-30B | Calibration Evidence Model | Parameter fitting separated from validation, with source evidence, residuals, accepted ranges, rejected data, and uncertainty updates. | Implemented foundation |
 | HS-31 | Scenario Library CFD Upgrade | Existing ICS scenarios gain CFD-backed expected process evolution. | Implemented foundation |
-| HS-31A | Scenario Process-Truth Review | Scenario process evolution, network effects, operator/historian effects, and prohibited claims reviewed before demo/training use. | Planned |
-| HS-32 | CFD Lab Bundle v2 | Export mesh, geometry, state timeline, scalar fields, flow snapshots, PCAP, transcript, topology, manifest, and checksums. | Planned |
-| HS-33 | Runtime Performance Gate | Benchmark grid sizes, solver time step, memory, CPU, stability, deterministic output, and long-run drift. | Planned |
-| HS-34 | Digital-Twin Validation Gate | Verification cases, conservation checks, manufactured solutions, and optional external CFD comparison. | Planned |
-| HS-34A | External Review And Calibration Evidence Gate | Optional external CFD comparison, water-treatment SME review, and calibration evidence recorded without automatic status upgrades. | Planned |
-| HS-35 | Reference Water Plant CFD Release | First CFD-backed Reference Water Treatment Plant release candidate. | Planned |
+| HS-31A | Scenario Process-Truth Review | Scenario process evolution, network effects, operator/historian effects, and prohibited claims reviewed before demo/training use. | Implemented foundation |
+| HS-32 | CFD Lab Bundle v2 | Export mesh, geometry, state timeline, scalar fields, flow snapshots, PCAP, transcript, topology, manifest, and checksums. | Implemented foundation |
+| HS-33 | Runtime Performance Gate | Benchmark grid sizes, solver time step, memory, CPU, stability, deterministic output, and long-run drift. | Implemented foundation |
+| HS-34 | Digital-Twin Validation Gate | Verification cases, conservation checks, manufactured solutions, and optional external CFD comparison. | Implemented foundation |
+| HS-34A | External Review And Calibration Evidence Gate | Optional external CFD comparison, water-treatment SME review, and calibration evidence recorded without automatic status upgrades. | Implemented foundation |
+| HS-35 | Reference Water Plant CFD Release | First CFD-backed Reference Water Treatment Plant release candidate. | Implemented foundation |
 
 ## Current Gate
 
@@ -103,6 +103,37 @@ HS-31 adds deterministic `synthetic_cfd_process_truth` records to built-in ICS
 runtime artifacts and bundles. The records describe scenario process evolution
 for selected areas while remaining synthetic process truth, not real-plant
 validation.
+HS-31A adds deterministic `synthetic_scenario_process_review` records and
+`process-review.csv` bundle artifacts so each scenario can be checked for
+process truth, observable network effects, operator/historian effects, review
+questions, and prohibited claims before demo or training use.
+HS-32 adds deterministic `synthetic_cfd_lab_bundle_v2` artifacts:
+`cfd-mesh-geometry.json`, `cfd-state-timeline.csv`, `cfd-scalar-fields.csv`,
+and `cfd-flow-snapshots.csv`. These compact artifacts connect the existing
+network bundle to process-state evidence without exporting unrestricted
+full-field arrays or claiming real-plant validation.
+HS-33 adds `synthetic_runtime_performance_gate` records for `tiny-grid`,
+`small-grid`, and `medium-grid` CFD presets. The gate records wall-time budget,
+estimated memory, output size, stability, CFL, mass residual, long-run drift,
+and deterministic signatures. These records are local runtime evidence, not
+hardware qualification or appliance sizing.
+HS-34 adds a Digital-Twin Validation Gate with
+`synthetic_digital_twin_validation_gate` evidence. The gate combines the
+synthetic numerical verification suite, reference area-model checks, and
+optional external CFD comparison records. The current real-plant validation
+status remains `blocked_missing_real_calibration_and_external_validation`, so
+the gate proves implementation evidence only and does not claim calibrated
+plant equivalence.
+HS-34A adds an External Review And Calibration Evidence Gate with
+`synthetic_external_review_calibration_gate` evidence. Its default disposition
+is `pending_external_review`. When review notes, external CFD comparisons, or
+calibration assessments are recorded, the gate changes only to
+`evidence_recorded_not_validated`; it never upgrades model status by itself.
+HS-35 adds `synthetic_reference_water_plant_cfd_release_candidate` evidence
+that ties together the full-plant offline export path, selected-area full-cell
+path, selected-area live launch plan, CFD runtime performance gate, digital-twin
+validation gate, external review/calibration gate, expected bundle artifacts,
+and release checklist.
 
 ## Safety Boundaries
 

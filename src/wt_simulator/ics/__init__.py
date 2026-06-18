@@ -13,11 +13,15 @@ __all__ = [
     "render_ics_pcap_bytes",
     "render_live_plan",
     "render_process_evolution_csv",
+    "render_process_review_csv",
+    "render_release_candidate_json",
+    "render_release_candidate_markdown",
     "render_summary_markdown",
     "render_transcript_csv",
     "run_live_orchestration",
     "scenario_ids",
     "validate_profile",
+    "build_reference_water_plant_cfd_release_candidate",
 ]
 
 
@@ -43,7 +47,14 @@ def __getattr__(name: str) -> Any:
     elif name == "render_ics_pcap_bytes":
         module = import_module(".pcap", __name__)
     elif name in {
+        "build_reference_water_plant_cfd_release_candidate",
+        "render_release_candidate_json",
+        "render_release_candidate_markdown",
+    }:
+        module = import_module(".release", __name__)
+    elif name in {
         "render_process_evolution_csv",
+        "render_process_review_csv",
         "render_summary_markdown",
         "render_transcript_csv",
     }:

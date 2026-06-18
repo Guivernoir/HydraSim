@@ -5,7 +5,7 @@ HydraSim now uses a local quality gate:
 ```bash
 python -m pip install -e ".[dev,modbus]"
 python tools/check_project_quality.py
-python -m black --check src/wt_simulator/scenarios src/wt_simulator/ics src/wt_simulator/hydraulics tests/test_mvp_modbus_scenarios.py tests/test_ics_runtime.py tests/test_cfd_digital_twin.py tests/test_cfd_coupling.py tests/test_cfd_operator_semantics.py tests/test_cfd_calibration_evidence.py tests/test_cfd_verification.py tools
+python -m black --check src/wt_simulator/scenarios src/wt_simulator/ics src/wt_simulator/hydraulics tests tools
 python -m unittest discover -s tests -v
 ```
 
@@ -29,6 +29,10 @@ The gate enforces:
 - CFD supervisory profile and record validation with unknown site identity;
 - CFD operator/historian semantic bundle validation with synthetic action,
   alarm, trend, maintenance, and engineering-event caveats;
+- CFD digital-twin validation gate checks with implementation evidence
+  separated from real-plant validation;
+- CFD external review and calibration evidence gate checks with no automatic
+  model-status upgrade;
 - deterministic CFD summary export checks;
 - required `pymodbus` availability for live Modbus end-to-end tests;
 - an explicit legacy exception list for oversized modules that existed before
@@ -76,7 +80,30 @@ drift. These results use `synthetic_numerical_verification` evidence and remain
 not real-plant validation. The gate also confirms HS-31 scenario-level
 `synthetic_cfd_process_truth` records, deterministic `process-evolution.csv`
 export, and process-truth documentation for every built-in reference plant
-scenario. The gate also confirms deterministic CFD summary export and requires the
+scenario. The gate also confirms HS-31A scenario process-truth review records,
+`synthetic_scenario_process_review` evidence, deterministic `process-review.csv`
+export, and explicit must-not-claim text for every built-in reference plant
+scenario. The gate also confirms HS-32 CFD Lab Bundle v2 artifacts with
+`synthetic_cfd_lab_bundle_v2` evidence in `cfd-mesh-geometry.json`,
+`cfd-state-timeline.csv`, `cfd-scalar-fields.csv`, and
+`cfd-flow-snapshots.csv`. The gate also confirms HS-33 Runtime Performance Gate
+records with `synthetic_runtime_performance_gate` evidence, bounded wall-time
+budgets, memory estimates, output-size budgets, stability, CFL, mass residual,
+long-run drift, and deterministic exports. This is not hardware qualification.
+The gate also confirms HS-34 Digital-Twin Validation Gate records with
+`synthetic_digital_twin_validation_gate` evidence and the
+`blocked_missing_real_calibration_and_external_validation` status. This proves
+current implementation checks are wired together, but it is not real-plant
+validation.
+The gate also confirms HS-34A External Review And Calibration Evidence Gate
+records with `synthetic_external_review_calibration_gate` evidence,
+`pending_external_review` default disposition, deterministic export, and no
+automatic model-status upgrade.
+The gate also confirms HS-35 Reference Water Plant CFD Release Candidate
+records with `synthetic_reference_water_plant_cfd_release_candidate` evidence,
+full-plant offline output, selected-area full-cell output, selected-area live
+plan, expected bundle artifacts, and deterministic JSON output.
+The gate also confirms deterministic CFD summary export and requires the
 model-scope and roadmap documents to keep the no-overclaim boundary visible:
 CFD evidence is not certification, commissioning authority, real-plant
 validation, safety-system protection, or unrestricted design authority.

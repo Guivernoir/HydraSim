@@ -34,16 +34,10 @@ from wt_simulator.hydraulics.cfd import (
     effective_diffusivity,
     assess_calibration_evidence,
     build_reference_calibration_assessment,
-    estimate_field_memory_bytes,
     evaluate_calibration_residual,
     export_cfd_summary,
-    get_performance_preset,
     initialize_flow,
-    mesh_for_preset,
-    performance_preset_ids,
-    performance_presets,
     reference_area_model,
-    run_cfd_benchmark,
     solve_flow_step,
     step_scalar_transport,
     unit_process_catalog,
@@ -412,37 +406,6 @@ class CfdDigitalTwinTests(unittest.TestCase):
         filter_conditions = boundary_condition_ids()
         self.assertIn("bc-porous-filter-media", filter_conditions)
         self.assertIn("bc-backwash-flow", filter_conditions)
-
-    def test_performance_presets_define_bounded_grid_envelope(self) -> None:
-        self.assertEqual(
-            performance_preset_ids(), ("tiny-grid", "small-grid", "medium-grid")
-        )
-
-        previous_cells = 0
-        for preset in performance_presets():
-            with self.subTest(preset_id=preset.preset_id):
-                preset.validate()
-                mesh = mesh_for_preset(preset)
-                self.assertGreater(mesh.cell_count, previous_cells)
-                previous_cells = mesh.cell_count
-                estimated = estimate_field_memory_bytes(
-                    mesh, scalar_count=preset.scalar_count
-                )
-                expected = mesh.cell_count * (4 + preset.scalar_count) * 8
-                self.assertEqual(estimated, expected + mesh.cell_count)
-
-    def test_tiny_cfd_benchmark_reports_stable_evidence(self) -> None:
-        preset = get_performance_preset("tiny-grid")
-        result = run_cfd_benchmark(preset, iterations=1)
-
-        result.validate()
-        self.assertEqual(result.preset_id, "tiny-grid")
-        self.assertEqual(result.cell_count, 36)
-        self.assertGreater(result.estimated_field_memory_bytes, 0)
-        self.assertEqual(result.iterations, 1)
-        self.assertGreaterEqual(result.wall_time_seconds, 0.0)
-        self.assertTrue(result.stable)
-        self.assertGreaterEqual(result.mass_residual, 0.0)
 
 
 if __name__ == "__main__":

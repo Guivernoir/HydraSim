@@ -30,8 +30,10 @@ Every slice should run:
 ```bash
 .venv/bin/python -m pip install -e ".[dev,modbus]"
 .venv/bin/python tools/check_project_quality.py
-.venv/bin/python -m black --check src/wt_simulator/scenarios src/wt_simulator/ics src/wt_simulator/hydraulics tests/test_mvp_modbus_scenarios.py tests/test_ics_runtime.py tests/test_cfd_digital_twin.py tests/test_cfd_coupling.py tests/test_cfd_operator_semantics.py tests/test_cfd_calibration_evidence.py tests/test_cfd_verification.py tools
+.venv/bin/python -m black --check src/wt_simulator/scenarios src/wt_simulator/ics src/wt_simulator/hydraulics tests tools
 .venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m compileall -q src tests
+find src tests -type d -name __pycache__ -prune -exec rm -rf {} +
 git diff --check
 ```
 

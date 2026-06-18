@@ -6,9 +6,11 @@ import hashlib
 import json
 from pathlib import Path
 
+from .evidence.cfd_bundle import build_cfd_lab_artifacts
 from .pcap import render_ics_pcap_bytes
 from .render import (
     render_process_evolution_csv,
+    render_process_review_csv,
     render_summary_markdown,
     render_transcript_csv,
 )
@@ -102,8 +104,10 @@ def export_ics_bundle(
     topology = _topology_markdown(artifact).encode("utf-8")
     controller_states = _controller_states_csv(artifact).encode("utf-8")
     process_evolution = render_process_evolution_csv(artifact).encode("utf-8")
+    process_reviews = render_process_review_csv(artifact).encode("utf-8")
     pcap = render_ics_pcap_bytes(artifact)
     notes = _capture_notes(artifact).encode("utf-8")
+    cfd_artifacts = build_cfd_lab_artifacts(artifact)
     manifest = {
         "profile_id": artifact.profile.profile_id,
         "scenario_id": artifact.scenario.scenario_id,
@@ -119,6 +123,9 @@ def export_ics_bundle(
         "transaction_count": len(artifact.transactions),
         "controller_state_count": len(artifact.controller_states),
         "process_evolution_count": len(artifact.process_evolution),
+        "process_review_count": len(artifact.process_reviews),
+        "cfd_lab_bundle_version": "v2",
+        "cfd_lab_artifact_count": len(cfd_artifacts),
         "limitations": list(artifact.limitations),
     }
     artifacts = {
@@ -127,12 +134,14 @@ def export_ics_bundle(
         "topology.md": topology,
         "controller-states.csv": controller_states,
         "process-evolution.csv": process_evolution,
+        "process-review.csv": process_reviews,
         "scenario.pcap": pcap,
         "capture-notes.md": notes,
         "manifest.json": (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(
             "utf-8"
         ),
     }
+    artifacts.update(cfd_artifacts)
 
     written: list[Path] = []
     checksum_lines: list[str] = []

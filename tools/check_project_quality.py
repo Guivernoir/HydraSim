@@ -13,6 +13,8 @@ import sys
 import importlib.util
 from pathlib import Path
 
+from quality_ics import check_ics_docs
+
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
@@ -118,72 +120,6 @@ def _check_scenario_docs(errors: list[str]) -> None:
             errors.append(f"{scenario_id}: missing from scenario docs")
 
 
-def _check_ics_docs(errors: list[str]) -> None:
-    from wt_simulator.ics import (
-        build_runtime_artifact,
-        get_profile,
-        profile_ids,
-        render_process_evolution_csv,
-        render_ics_pcap_bytes,
-        render_transcript_csv,
-        scenario_ids,
-        validate_profile,
-    )
-
-    docs = (
-        (ROOT / "README.md").read_text("utf-8")
-        + (ROOT / "docs" / "INDUSTRIAL_SIMULATOR_ROADMAP.md").read_text("utf-8")
-        + (ROOT / "docs" / "REFERENCE_WATER_PLANT.md").read_text("utf-8")
-        + (ROOT / "docs" / "SLICE_ROADMAP.md").read_text("utf-8")
-    )
-    for profile_id in profile_ids():
-        problems = validate_profile(get_profile(profile_id))
-        if problems:
-            errors.append(f"{profile_id}: profile validation failed: {problems}")
-        if profile_id not in docs:
-            errors.append(f"{profile_id}: missing from ICS docs")
-    for scenario_id in scenario_ids():
-        if scenario_id not in docs:
-            errors.append(f"{scenario_id}: missing from ICS docs")
-        artifact_for_scenario = build_runtime_artifact(
-            "reference-water-plant",
-            scenario_id,
-            "all",
-            "offline-export",
-        )
-        if not artifact_for_scenario.process_evolution:
-            errors.append(f"{scenario_id}: missing CFD process evolution")
-        for record in artifact_for_scenario.process_evolution:
-            try:
-                record.validate()
-            except ValueError as exc:
-                errors.append(f"{scenario_id}: invalid process evolution: {exc}")
-        process_csv = render_process_evolution_csv(artifact_for_scenario)
-        if "synthetic_cfd_process_truth" not in process_csv:
-            errors.append(f"{scenario_id}: missing process truth evidence status")
-
-    artifact = build_runtime_artifact(
-        "reference-water-plant",
-        "ICS-WTP-002",
-        "all",
-        "offline-export",
-    )
-    if render_transcript_csv(artifact) != render_transcript_csv(artifact):
-        errors.append("reference-water-plant: transcript output is not deterministic")
-    if render_ics_pcap_bytes(artifact) != render_ics_pcap_bytes(artifact):
-        errors.append("reference-water-plant: PCAP output is not deterministic")
-    if render_process_evolution_csv(artifact) != render_process_evolution_csv(artifact):
-        errors.append("reference-water-plant: process truth is not deterministic")
-    for phrase in (
-        "HS-31",
-        "Scenario Library CFD Upgrade",
-        "synthetic_cfd_process_truth",
-        "process-evolution.csv",
-    ):
-        if phrase not in docs:
-            errors.append(f"ICS CFD process docs: missing {phrase!r}")
-
-
 def _check_cfd_docs(errors: list[str]) -> None:
     from wt_simulator.hydraulics.cfd import (
         AREA_IDS,
@@ -197,13 +133,20 @@ def _check_cfd_docs(errors: list[str]) -> None:
         assess_calibration_evidence,
         assess_calibration_fit,
         boundary_condition_catalog,
+        build_digital_twin_validation_gate,
+        build_external_review_calibration_gate,
         build_reference_calibration_assessment,
         build_reference_numerical_verification_suite,
+        build_runtime_performance_gate,
         controller_coupling_catalog,
         device_coupling_catalog,
         export_cfd_summary,
         fit_calibration_parameter,
         performance_presets,
+        render_digital_twin_validation_gate_json,
+        render_external_review_calibration_gate_json,
+        render_runtime_performance_gate_json,
+        runtime_performance_budgets,
         build_reference_operator_historian_semantics,
         build_reference_supervisory_records,
         reference_area_model,
@@ -268,6 +211,69 @@ def _check_cfd_docs(errors: list[str]) -> None:
         preset.validate()
         if preset.preset_id not in docs:
             errors.append(f"{preset.preset_id}: missing from CFD docs")
+    for budget in runtime_performance_budgets():
+        budget.validate()
+        if budget.preset_id not in docs:
+            errors.append(f"{budget.preset_id}: performance budget missing from docs")
+    performance_records = build_runtime_performance_gate(iterations=1)
+    for record in performance_records:
+        record.validate()
+        if not record.gate_passed:
+            errors.append(f"{record.preset_id}: runtime performance gate failed")
+    rendered_gate = render_runtime_performance_gate_json(performance_records)
+    if rendered_gate != render_runtime_performance_gate_json(performance_records):
+        errors.append("CFD runtime performance gate export is not deterministic")
+    if "synthetic_runtime_performance_gate" not in rendered_gate:
+        errors.append("CFD runtime performance gate: missing evidence status")
+    for phrase in (
+        "HS-33",
+        "Runtime Performance Gate",
+        "synthetic_runtime_performance_gate",
+        "not hardware qualification",
+    ):
+        if phrase not in docs:
+            errors.append(f"CFD runtime performance docs: missing {phrase!r}")
+    validation_gate = build_digital_twin_validation_gate()
+    validation_gate.validate()
+    if not validation_gate.implementation_verified:
+        errors.append("CFD validation gate: implementation is not verified")
+    if (
+        validation_gate.real_plant_validation_status
+        != "blocked_missing_real_calibration_and_external_validation"
+    ):
+        errors.append("CFD validation gate: real-plant validation is not blocked")
+    rendered_validation = render_digital_twin_validation_gate_json(validation_gate)
+    if rendered_validation != render_digital_twin_validation_gate_json(validation_gate):
+        errors.append("CFD validation gate export is not deterministic")
+    if "synthetic_digital_twin_validation_gate" not in rendered_validation:
+        errors.append("CFD validation gate: missing evidence status")
+    for phrase in (
+        "HS-34",
+        "Digital-Twin Validation Gate",
+        "synthetic_digital_twin_validation_gate",
+        "blocked_missing_real_calibration_and_external_validation",
+    ):
+        if phrase not in docs:
+            errors.append(f"CFD validation gate docs: missing {phrase!r}")
+    review_gate = build_external_review_calibration_gate()
+    review_gate.validate()
+    if review_gate.evidence_disposition != "pending_external_review":
+        errors.append("CFD review gate: default disposition is not pending")
+    if review_gate.model_status_upgraded:
+        errors.append("CFD review gate: model status upgraded automatically")
+    rendered_review = render_external_review_calibration_gate_json(review_gate)
+    if rendered_review != render_external_review_calibration_gate_json(review_gate):
+        errors.append("CFD review gate export is not deterministic")
+    if "synthetic_external_review_calibration_gate" not in rendered_review:
+        errors.append("CFD review gate: missing evidence status")
+    for phrase in (
+        "HS-34A",
+        "External Review And Calibration Evidence Gate",
+        "synthetic_external_review_calibration_gate",
+        "pending_external_review",
+    ):
+        if phrase not in docs:
+            errors.append(f"CFD review gate docs: missing {phrase!r}")
     sensor_count = 0
     actuator_count = 0
     for contract in device_coupling_catalog():
@@ -455,7 +461,7 @@ def main() -> int:
     _check_line_counts(files, errors)
     _check_markdown_links(files, errors)
     _check_scenario_docs(errors)
-    _check_ics_docs(errors)
+    check_ics_docs(ROOT, errors)
     _check_cfd_docs(errors)
     _check_required_test_dependencies(errors)
 

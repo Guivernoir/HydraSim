@@ -356,6 +356,37 @@ drift. HS-30B is implemented as a calibration evidence model that keeps fitting
 separate from validation, preserves rejected data, updates uncertainty, and
 requires an explicit calibration record before `evidence_calibrated` status.
 HS-31 is implemented as deterministic `synthetic_cfd_process_truth` records on
-built-in ICS runtime artifacts and bundles. The full closed-loop CFD runtime,
-lab bundle v2 field snapshots, external CFD comparison, and later performance
+built-in ICS runtime artifacts and bundles. HS-31A is implemented as
+deterministic `synthetic_scenario_process_review` records that connect process
+truth, observable network effects, operator/historian effects, review
+questions, and prohibited claims before demo/training use. HS-32 is implemented
+as compact `synthetic_cfd_lab_bundle_v2` process-state artifacts:
+`cfd-mesh-geometry.json`, `cfd-state-timeline.csv`, `cfd-scalar-fields.csv`,
+and `cfd-flow-snapshots.csv`. These artifacts reproduce bounded process-state
+evidence beside transcript, PCAP, topology, manifest, and checksums without
+claiming real-plant validation. HS-33 is implemented as a Runtime Performance
+Gate with `synthetic_runtime_performance_gate` records for bounded local grid
+presets, wall-time budgets, memory estimates, output-size budgets, stability,
+CFL, mass residual, long-run drift, and deterministic signatures. Runtime
+performance evidence is not hardware qualification, appliance sizing, or field
+performance evidence. HS-34 is implemented as a Digital-Twin Validation Gate
+with `synthetic_digital_twin_validation_gate` evidence. The gate records
+implementation verification from numerical checks and reference model records,
+but its current real-plant validation status is
+`blocked_missing_real_calibration_and_external_validation`. Accepted external
+CFD comparison records may be attached later, but they remain comparison
+evidence and do not by themselves establish real-plant validation. HS-34A is
+implemented as an External Review And Calibration Evidence Gate with
+`synthetic_external_review_calibration_gate` evidence and
+`pending_external_review` as the default disposition. Review notes, calibration
+assessments, and external CFD comparisons can be recorded as
+`evidence_recorded_not_validated`, but they do not automatically upgrade model
+status. The full closed-loop CFD runtime and hardware-specific qualification
 gates remain future slices.
+HS-35 is implemented as the first Reference Water Plant CFD Release Candidate
+foundation. It emits `synthetic_reference_water_plant_cfd_release_candidate`
+evidence that proves the current full-plant offline export, selected-area
+full-cell, selected-area live plan, CFD performance, digital-twin validation,
+external review/calibration, and expected bundle-artifact surfaces are present
+together. It does not claim full-plant live orchestration, hardware
+qualification, real-plant validation, or safety evidence.

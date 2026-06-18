@@ -144,6 +144,21 @@ Live launch starts local HydraSim Modbus process endpoints for the selected
 area. It uses the common water-process runtime for each endpoint and does not
 claim vendor PLC, RTU, HMI, or historian emulation.
 
+Render the HS-35 Reference Water Plant CFD Release Candidate checklist:
+
+```bash
+wts-ics release-candidate --format markdown
+wts-ics release-candidate --scenario ICS-WTP-004 --area dosing --format json
+```
+
+The release-candidate output has evidence status
+`synthetic_reference_water_plant_cfd_release_candidate`. It ties together the
+full-plant `offline-export` path, selected-area `full-cell` path,
+selected-area live launch plan, CFD runtime performance gate, digital-twin
+validation gate, external review/calibration gate, and expected bundle
+artifacts. It is a release-candidate checklist, not real-plant validation,
+commissioning evidence, certification, safety evidence, or field readiness.
+
 The bundle contains:
 
 - `summary.md`;
@@ -151,6 +166,11 @@ The bundle contains:
 - `topology.md`;
 - `controller-states.csv`;
 - `process-evolution.csv`;
+- `process-review.csv`;
+- `cfd-mesh-geometry.json`;
+- `cfd-state-timeline.csv`;
+- `cfd-scalar-fields.csv`;
+- `cfd-flow-snapshots.csv`;
 - `scenario.pcap`;
 - `capture-notes.md`;
 - `manifest.json`;
@@ -166,6 +186,64 @@ start value, end value, trend, CFD basis, and limitations.
 The `process-evolution.csv` artifact is deterministic synthetic simulator truth.
 It is useful for scenario review and regression, but it is not real-plant
 validation, commissioning evidence, compliance evidence, or safety evidence.
+
+## HS-31A Scenario Process-Truth Review
+
+HS-31A adds a deterministic `process-review.csv` artifact to reference water
+plant bundles. Each record ties together:
+
+- the scenario's CFD process evolution;
+- observable network effects such as reads, writes, exceptions, and review hints;
+- operator, historian, HMI, engineering-workstation, and controller-state effects;
+- reviewer questions for demo/training use;
+- explicit `must_not_claim` text.
+
+The process review evidence status is `synthetic_scenario_process_review`. It
+is designed to help a reviewer check whether a scenario is coherent before it
+is used in demos, training, or passive-analysis labs. It does not prove a real
+plant condition, real equipment behavior, certification, safety impact,
+operational validation, or calibrated plant equivalence.
+
+## HS-32 CFD Lab Bundle v2
+
+HS-32 adds compact CFD process-state evidence to reference water plant bundles:
+
+- `cfd-mesh-geometry.json` records mesh dimensions, extents, boundaries,
+  obstacles, digital-twin references, limitations, and the
+  `synthetic_cfd_lab_bundle_v2` evidence status.
+- `cfd-state-timeline.csv` records scenario process-state changes tied to the
+  selected scenario and area.
+- `cfd-scalar-fields.csv` records deterministic sampled scalar-field values at
+  bounded mesh sample cells.
+- `cfd-flow-snapshots.csv` records deterministic sampled velocity, pressure,
+  mass-residual, CFL, and stability evidence.
+
+These files let a lab bundle reproduce both network behavior and process-state
+evidence in a compact form. They intentionally do not export unrestricted
+full-field arrays and do not claim real-plant validation, commissioning
+evidence, certification, safety-system protection, or full physical fidelity.
+
+## HS-35 Reference Water Plant CFD Release Candidate
+
+HS-35 adds a deterministic release-candidate checklist for the CFD-backed
+Reference Water Plant surface. The checklist confirms:
+
+- the `reference-water-plant` profile is available;
+- a full-plant `offline-export` artifact can be built;
+- a selected-area `full-cell` artifact can be built;
+- a selected-area live orchestration plan has launchable synthetic Modbus
+  endpoints;
+- CFD runtime performance records pass for bounded local presets;
+- the Digital-Twin Validation Gate remains implementation evidence only;
+- the External Review And Calibration Evidence Gate remains pending or recorded
+  without automatic model-status upgrade;
+- the expected bundle artifact set includes transcript, PCAP, topology,
+  controller state, process evolution, process review, compact CFD artifacts,
+  manifest, notes, and checksums.
+
+HS-35 does not add full-plant live orchestration, hardware qualification,
+real-site calibration, operational validation, safety certification, or vendor
+system emulation.
 
 ## Legacy Compatibility
 
@@ -191,6 +269,9 @@ Implemented:
 - controller/HMI/historian/engineering-workstation traffic personas;
 - deterministic controller mode/routine/alarm/setpoint/effect evidence;
 - deterministic CFD-backed process evolution evidence;
+- deterministic scenario process-truth review evidence;
+- compact CFD Lab Bundle v2 process-state evidence;
+- deterministic Reference Water Plant CFD Release Candidate checklist;
 - topology, media, and control-system metadata;
 - create-new lab bundle export;
 - profile/scenario documentation coverage checks.

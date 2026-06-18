@@ -11,10 +11,16 @@ Water treatment process simulator with:
 - Configurable Reference Water Plant profiles for staged ICS-style lab bundles
 - CFD/digital-twin foundation primitives for bounded finite-volume water-treatment models
 - CFD-backed process-evolution truth for built-in reference plant scenarios
+- Scenario process-truth review records for demo/training coherence checks
+- CFD Lab Bundle v2 artifacts with compact mesh, geometry, scalar, flow, and state evidence
+- Runtime Performance Gate evidence for bounded local CFD presets
+- Digital-Twin Validation Gate evidence separating implementation verification from real-plant validation
+- External Review And Calibration Evidence Gate records for non-validating review evidence
+- Reference Water Plant CFD release-candidate checklist and command surface
 
 HydraSim is designed to emulate realistic water treatment process behavior for integration and control testing against real-world PLC/SCADA systems. It allows engineers and researchers to prototype control logic, validate operational behaviors, and exercise control loops without access to physical hardware.
 
-The goal is practical plant-behavior emulation for integration and control testing. The post-HS-20 direction adds bounded in-process CFD/digital-twin primitives, but HydraSim still must not be treated as certified design authority, commissioning evidence, safety validation, or real-plant equivalence without separate calibration and validation evidence.
+The goal is practical plant-behavior emulation for integration and control testing. The post-HS-20 direction adds bounded in-process CFD/digital-twin primitives, including `synthetic_digital_twin_validation_gate` records whose current real-plant validation status is `blocked_missing_real_calibration_and_external_validation`. HS-34A also adds `synthetic_external_review_calibration_gate` records that default to `pending_external_review` and never auto-upgrade model status. HS-35 adds `synthetic_reference_water_plant_cfd_release_candidate` evidence tying the current offline, selected-area live, CFD gate, and bundle surfaces into one release-candidate checklist. HydraSim still must not be treated as certified design authority, commissioning evidence, safety validation, or real-plant equivalence without separate calibration and validation evidence.
 
 ## Architecture
 

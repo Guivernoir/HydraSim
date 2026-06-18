@@ -79,6 +79,31 @@ def render_process_evolution_csv(artifact: RuntimeArtifact) -> str:
     return "\n".join(rows) + "\n"
 
 
+def render_process_review_csv(artifact: RuntimeArtifact) -> str:
+    rows = [
+        "scenario_id,area,process_truth,observable_network_effects,"
+        "operator_historian_effects,review_questions,must_not_claim,"
+        "evidence_status"
+    ]
+    for record in artifact.process_reviews:
+        rows.append(
+            ",".join(
+                _csv(value)
+                for value in (
+                    record.scenario_id,
+                    record.area,
+                    record.process_truth,
+                    record.observable_network_effects,
+                    record.operator_historian_effects,
+                    "; ".join(record.review_questions),
+                    "; ".join(record.must_not_claim),
+                    record.evidence_status,
+                )
+            )
+        )
+    return "\n".join(rows) + "\n"
+
+
 def render_summary_markdown(artifact: RuntimeArtifact) -> str:
     unit_rows = (
         (unit.unit_id, unit.area, unit.kind, unit.label)
@@ -132,6 +157,16 @@ def render_summary_markdown(artifact: RuntimeArtifact) -> str:
             record.evidence_status,
         )
         for record in artifact.process_evolution
+    )
+    review_rows = (
+        (
+            record.area,
+            record.process_truth,
+            record.observable_network_effects,
+            record.operator_historian_effects,
+            record.evidence_status,
+        )
+        for record in artifact.process_reviews
     )
     parts = [
         f"# {artifact.profile.name}: {artifact.scenario.name}",
@@ -201,6 +236,19 @@ def render_summary_markdown(artifact: RuntimeArtifact) -> str:
                 "Evidence status",
             ),
             process_rows,
+        ),
+        "",
+        "## Scenario Process-Truth Review",
+        "",
+        _table(
+            (
+                "Area",
+                "Process truth",
+                "Network effects",
+                "Operator/historian effects",
+                "Evidence status",
+            ),
+            review_rows,
         ),
         "",
         "## Limitations",

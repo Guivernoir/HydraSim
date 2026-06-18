@@ -15,6 +15,11 @@ from .orchestration import (
 )
 from .pcap import render_ics_pcap_bytes
 from .profiles import get_profile, profile_ids
+from .release import (
+    build_reference_water_plant_cfd_release_candidate,
+    render_release_candidate_json,
+    render_release_candidate_markdown,
+)
 from .render import render_summary_markdown, render_transcript_csv
 from .runtime import build_runtime_artifact
 from .scenarios import scenario_ids
@@ -95,6 +100,18 @@ def _launch_live(args) -> int:
     return 0
 
 
+def _release_candidate(args) -> int:
+    release = build_reference_water_plant_cfd_release_candidate(
+        scenario_id=args.scenario,
+        selected_area=args.area,
+    )
+    if args.format == "json":
+        _write_text_or_print(render_release_candidate_json(release), args.output)
+    else:
+        _write_text_or_print(render_release_candidate_markdown(release), args.output)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run HydraSim ICS plant profiles")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -151,6 +168,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     live.add_argument("--dry-run", action="store_true")
     live.add_argument("--output", type=Path)
 
+    release = sub.add_parser(
+        "release-candidate",
+        help="render the HS-35 Reference Water Plant CFD release-candidate checklist",
+    )
+    release.add_argument("--scenario", choices=scenario_ids(), default="ICS-WTP-002")
+    release.add_argument(
+        "--area",
+        choices=tuple(item for item in AREA_CHOICES if item != "all"),
+        default="disinfection",
+    )
+    release.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    release.add_argument("--output", type=Path)
+
     args = parser.parse_args(argv)
     try:
         if args.command == "list-profiles":
@@ -174,6 +204,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "launch-live":
             return _launch_live(args)
+        if args.command == "release-candidate":
+            return _release_candidate(args)
     except (FileExistsError, ValueError) as exc:
         parser.error(str(exc))
     raise AssertionError("unreachable command")

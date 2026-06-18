@@ -20,6 +20,7 @@ from wt_simulator.ics import (  # noqa: E402
     render_ics_pcap_bytes,
     render_live_plan,
     render_process_evolution_csv,
+    render_process_review_csv,
     render_summary_markdown,
     render_transcript_csv,
     run_live_orchestration,
@@ -93,6 +94,15 @@ class TestIcsRuntime(unittest.TestCase):
         self.assertEqual(process.area, "disinfection")
         self.assertEqual(process.evidence_status, "synthetic_cfd_process_truth")
         self.assertIn("not real-plant validation", " ".join(process.limitations))
+        self.assertEqual(len(artifact.process_reviews), 1)
+        review = artifact.process_reviews[0]
+        self.assertEqual(review.area, "disinfection")
+        self.assertEqual(
+            review.evidence_status,
+            "synthetic_scenario_process_review",
+        )
+        self.assertIn("writes=0", review.observable_network_effects)
+        self.assertIn("real plant validation", " ".join(review.must_not_claim))
 
     def test_field_device_stage_keeps_only_activation_traffic(self):
         artifact = build_runtime_artifact(
@@ -120,6 +130,7 @@ class TestIcsRuntime(unittest.TestCase):
         self.assertIn("Media: `mixed-lab`", rendered)
         self.assertIn("## Controller Logic State", rendered)
         self.assertIn("## CFD Process Evolution", rendered)
+        self.assertIn("## Scenario Process-Truth Review", rendered)
 
     def test_transcript_and_pcap_are_deterministic(self):
         artifact = build_runtime_artifact(
@@ -142,6 +153,14 @@ class TestIcsRuntime(unittest.TestCase):
         self.assertIn(
             "synthetic_cfd_process_truth", render_process_evolution_csv(artifact)
         )
+        self.assertEqual(
+            render_process_review_csv(artifact),
+            render_process_review_csv(artifact),
+        )
+        self.assertIn(
+            "synthetic_scenario_process_review",
+            render_process_review_csv(artifact),
+        )
 
     def test_bundle_export_creates_expected_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -161,9 +180,14 @@ class TestIcsRuntime(unittest.TestCase):
                     "topology.md",
                     "controller-states.csv",
                     "process-evolution.csv",
+                    "process-review.csv",
                     "scenario.pcap",
                     "capture-notes.md",
                     "manifest.json",
+                    "cfd-flow-snapshots.csv",
+                    "cfd-mesh-geometry.json",
+                    "cfd-scalar-fields.csv",
+                    "cfd-state-timeline.csv",
                     "checksums.sha256",
                 },
             )
@@ -173,8 +197,23 @@ class TestIcsRuntime(unittest.TestCase):
             self.assertGreater(manifest["transaction_count"], 0)
             self.assertGreaterEqual(manifest["controller_state_count"], 1)
             self.assertGreaterEqual(manifest["process_evolution_count"], 1)
+            self.assertGreaterEqual(manifest["process_review_count"], 1)
+            self.assertEqual(manifest["cfd_lab_bundle_version"], "v2")
+            self.assertEqual(manifest["cfd_lab_artifact_count"], 4)
             process_csv = (target / "process-evolution.csv").read_text("utf-8")
             self.assertIn("synthetic_cfd_process_truth", process_csv)
+            review_csv = (target / "process-review.csv").read_text("utf-8")
+            self.assertIn("synthetic_scenario_process_review", review_csv)
+            self.assertIn("Do not claim real plant validation", review_csv)
+            mesh_json = (target / "cfd-mesh-geometry.json").read_text("utf-8")
+            self.assertIn("synthetic_cfd_lab_bundle_v2", mesh_json)
+            self.assertIn("array_policy", mesh_json)
+            scalar_csv = (target / "cfd-scalar-fields.csv").read_text("utf-8")
+            flow_csv = (target / "cfd-flow-snapshots.csv").read_text("utf-8")
+            timeline_csv = (target / "cfd-state-timeline.csv").read_text("utf-8")
+            self.assertIn("cell_id", scalar_csv)
+            self.assertIn("mass_residual", flow_csv)
+            self.assertIn("synthetic_cfd_lab_bundle_v2", timeline_csv)
 
     def test_bundle_export_uses_create_new_directory_semantics(self):
         with tempfile.TemporaryDirectory() as tmp:
