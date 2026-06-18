@@ -136,10 +136,14 @@ class ModbusSlave:
         co_size = max(max_co_addr + 10, 100)
         di_size = max(max_di_addr + 10, 100)
 
-        self.ir_block = ModbusSequentialDataBlock(0, [0] * ir_size)
-        self.hr_block = ModbusSequentialDataBlock(0, [0] * hr_size)
-        self.co_block = ModbusSequentialDataBlock(0, [0] * co_size)
-        self.di_block = ModbusSequentialDataBlock(0, [0] * di_size)
+        # pymodbus 3.13 rejects zero-addressed data blocks internally, while
+        # Modbus clients still address registers from zero. HydraSim keeps its
+        # public register map zero-based and uses `address + 1` for direct block
+        # access below.
+        self.ir_block = ModbusSequentialDataBlock(1, [0] * ir_size)
+        self.hr_block = ModbusSequentialDataBlock(1, [0] * hr_size)
+        self.co_block = ModbusSequentialDataBlock(1, [0] * co_size)
+        self.di_block = ModbusSequentialDataBlock(1, [0] * di_size)
 
     def update_input_register(self, name: str, value: float):
         """Update input register (thread-safe with validation)."""

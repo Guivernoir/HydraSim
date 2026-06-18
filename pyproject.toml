@@ -26,7 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 modbus = [
-    "pymodbus>=3.11,<4",
+    "pymodbus>=3.11,<3.13",
 ]
 dev = [
     "pytest>=8.0",
@@ -41,6 +41,7 @@ wts-mvp-modbus-scenario = "wt_simulator.scenarios.mvp_modbus:main"
 wts-run-scenario = "wt_simulator.scenarios.run:main"
 wts-validate-scenario = "wt_simulator.scenarios.validate:main"
 wts-export-lab-bundle = "wt_simulator.scenarios.bundle:main"
+wts-ics = "wt_simulator.ics.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

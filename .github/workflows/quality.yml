@@ -16,14 +16,22 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install package and dev tools
-        run: python -m pip install -e ".[dev]"
+      - name: Install package, Modbus support, and dev tools
+        run: python -m pip install -e ".[dev,modbus]"
 
       - name: Format check
         run: >
           python -m black --check
           src/wt_simulator/scenarios
+          src/wt_simulator/ics
+          src/wt_simulator/hydraulics
           tests/test_mvp_modbus_scenarios.py
+          tests/test_ics_runtime.py
+          tests/test_cfd_digital_twin.py
+          tests/test_cfd_coupling.py
+          tests/test_cfd_operator_semantics.py
+          tests/test_cfd_calibration_evidence.py
+          tests/test_cfd_verification.py
           tools
 
       - name: Quality policy check

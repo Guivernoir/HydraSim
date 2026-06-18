@@ -11,7 +11,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 if importlib.util.find_spec("pymodbus") is None:
-    raise unittest.SkipTest("pymodbus optional dependency is not installed")
+    raise RuntimeError(
+        "pymodbus is required for the full HydraSim test gate; "
+        'install with `pip install -e ".[modbus]"`'
+    )
 
 from pymodbus.client import ModbusTcpClient
 
